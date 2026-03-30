@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { GitBranch, Users, Network, Plus, Settings, Activity, Zap, Trash2, X, ZoomIn, ZoomOut, Maximize2, Move, Link2, Unlink, LayoutGrid, ArrowRight, MousePointer, Wifi, WifiOff } from 'lucide-react';
+import { GitBranch, Users, Network, Plus, Settings, Activity, Zap, Trash2, X, ZoomIn, ZoomOut, Maximize2, Link2, Unlink, LayoutGrid, ArrowRight } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agentStore';
 import { useTeamStore } from '../../../stores/teamStore';
 import { Agent, Team } from '../../../types';
@@ -53,8 +53,8 @@ const getBezierPath = (x1: number, y1: number, x2: number, y2: number) => {
 };
 
 export function Topology() {
-  const { agents, setActiveAgent, activeAgentId } = useAgentStore();
-  const { teams, createTeam, addConnection, removeConnection } = useTeamStore();
+  const { agents, setActiveAgent, activeAgentId, updateAgent } = useAgentStore();
+  const { teams, createTeam, addConnection, removeConnection, addAgentToTeam, removeAgentFromTeam } = useTeamStore();
 
   const agentsList = Object.values(agents);
   const teamsList = Object.values(teams);
@@ -68,9 +68,16 @@ export function Topology() {
   const [newClusterTopology, setNewClusterTopology] = useState<'hierarchical' | 'mesh' | 'star' | 'chain'>('mesh');
   const [showConnectionsPanel, setShowConnectionsPanel] = useState(false);
 
-  // Connection mode - 'click' or 'drag'
-  const [connectionMode, setConnectionMode] = useState<'click' | 'drag' | null>(null);
-  const [connectionSource, setConnectionSource] = useState<string | null>(null);
+  // Free-form connections between any agents (no cluster required)
+  const [localConnections, setLocalConnections] = useState<{ id: string; fromId: string; toId: string }[]>([]);
+  // Connection currently being drawn by dragging
+  const [connectionDraw, setConnectionDraw] = useState<{ fromId: string; toX: number; toY: number } | null>(null);
+  // Ref mirrors connectionDraw state synchronously so event handlers always read the current value
+  const connectionDrawRef = useRef<{ fromId: string; toX: number; toY: number } | null>(null);
+  const setConnectionDrawSync = (val: { fromId: string; toX: number; toY: number } | null) => {
+    connectionDrawRef.current = val;
+    setConnectionDraw(val);
+  };
 
   // Canvas state
   const [zoom, setZoom] = useState(1);
@@ -87,9 +94,6 @@ export function Topology() {
     offsetX: 0,
     offsetY: 0,
   });
-
-  // Temporary connection while dragging
-  const [tempConnection, setTempConnection] = useState<{ fromId: string; toX: number; toY: number } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const didDragRef = useRef(false);
@@ -148,39 +152,15 @@ export function Topology() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // C key - toggle click-to-connect mode
-      if (e.key === 'c' && !e.ctrlKey && !e.metaKey && document.activeElement === document.body) {
-        e.preventDefault();
-        if (connectionMode === 'click') {
-          setConnectionMode(null);
-          setConnectionSource(null);
-        } else {
-          setConnectionMode('click');
-          setConnectionSource(null);
-        }
-      }
-      // Escape - cancel connection mode
       if (e.key === 'Escape') {
-        setConnectionMode(null);
-        setConnectionSource(null);
+        setConnectionDrawSync(null);
         setSelectedNodes(new Set());
-        setTempConnection(null);
-      }
-      // Delete/Backspace - delete selected connection
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodes.size > 0 && selectedTeamId) {
-        const nodeId = Array.from(selectedNodes)[0];
-        // If it's a connection, delete it
-        const conn = teamsList.find(t => t.id === selectedTeamId)?.connections.find(c => c.id === nodeId);
-        if (conn) {
-          removeConnection(selectedTeamId, conn.id);
-          setSelectedNodes(new Set());
-        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [connectionMode, selectedNodes, selectedTeamId, teamsList, removeConnection]);
+  }, []);
 
   const getAgentsByTeam = (teamId: string | null) => {
     return agentsList.filter((a) => a.teamId === teamId);
@@ -225,6 +205,7 @@ export function Topology() {
 
   const handleNodeMouseDown = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
+    e.preventDefault();
     didDragRef.current = false;
     dragStartPosRef.current = { x: e.clientX, y: e.clientY };
 
@@ -261,28 +242,6 @@ export function Topology() {
   const handleNodeClick = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
 
-    // If in click-to-connect mode
-    if (connectionMode === 'click' && connectionSource) {
-      const sourceTeam = getAgentTeam(connectionSource);
-      const targetTeam = getAgentTeam(nodeId);
-
-      // Can only connect within same team
-      if (sourceTeam?.id === targetTeam?.id || agentsList.find(a => a.id === nodeId)?.teamId === null) {
-        // Don't connect to self
-        if (connectionSource !== nodeId) {
-          if (sourceTeam) {
-            addConnection(sourceTeam.id, {
-              fromAgentId: connectionSource,
-              toAgentId: nodeId,
-            });
-          }
-        }
-      }
-      setConnectionMode(null);
-      setConnectionSource(null);
-      return;
-    }
-
     // Normal selection
     if (didDragRef.current) return;
     if (!selectedNodes.has(nodeId)) {
@@ -294,37 +253,7 @@ export function Topology() {
     }
   };
 
-  const handleAgentPortClick = (e: React.MouseEvent, agentId: string, portType: 'input' | 'output') => {
-    e.stopPropagation();
-    const team = getAgentTeam(agentId);
-    if (!team) return;
 
-    if (!connectionSource) {
-      // Start connection from output port
-      if (portType === 'output') {
-        setConnectionMode('click');
-        setConnectionSource(agentId);
-      }
-    } else {
-      // Complete connection to input port
-      if (portType === 'input' && connectionSource !== agentId) {
-        addConnection(team.id, {
-          fromAgentId: connectionSource,
-          toAgentId: agentId,
-        });
-      }
-      setConnectionMode(null);
-      setConnectionSource(null);
-    }
-  };
-
-  const handlePortMouseEnter = (agentId: string) => {
-    setHoveredAgent(agentId);
-  };
-
-  const handlePortMouseLeave = () => {
-    setHoveredAgent(null);
-  };
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
@@ -353,14 +282,17 @@ export function Topology() {
           },
         }));
 
-        // Update temp connection if drawing
-        if (connectionMode === 'drag' && connectionSource) {
-          const rect = containerRef.current?.getBoundingClientRect();
-          if (rect) {
-            const x = (e.clientX - rect.left - pan.x) / zoom;
-            const y = (e.clientY - rect.top - pan.y) / zoom;
-            setTempConnection({ fromId: connectionSource, toX: x, toY: y });
-          }
+      }
+
+      // Update live connection line while drawing
+      if (connectionDrawRef.current) {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          const x = (e.clientX - rect.left - pan.x) / zoom;
+          const y = (e.clientY - rect.top - pan.y) / zoom;
+          const updated = { ...connectionDrawRef.current, toX: x, toY: y };
+          connectionDrawRef.current = updated;
+          setConnectionDraw(updated);
         }
       }
 
@@ -371,74 +303,28 @@ export function Topology() {
         setPanStart({ x: e.clientX, y: e.clientY });
       }
     },
-    [dragState, isPanning, panStart, zoom, connectionMode, connectionSource]
+    [dragState, isPanning, panStart, zoom]
   );
 
   const handleMouseUp = useCallback(() => {
-    if (dragState.isDragging && connectionMode === 'drag' && connectionSource) {
-      // Check if dropped on an agent
-      const targetAgent = agentsList.find((agent) => {
-        if (agent.id === connectionSource) return false;
-        const pos = nodePositions[agent.id];
-        if (!pos) return false;
-        const dist = Math.sqrt(
-          Math.pow(pos.x - nodePositions[connectionSource].x - NODE_WIDTH / 2, 2) +
-          Math.pow(pos.y - nodePositions[connectionSource].y, 2)
-        );
-        return dist < 60;
-      });
-
-      if (targetAgent) {
-        const team = getAgentTeam(connectionSource);
-        if (team) {
-          addConnection(team.id, {
-            fromAgentId: connectionSource,
-            toAgentId: targetAgent.id,
-          });
-        }
-      }
-    }
-
-    setDragState({
-      isDragging: false,
-      nodeId: null,
-      startX: 0,
-      startY: 0,
-      offsetX: 0,
-      offsetY: 0,
-    });
+    // Agent node onMouseUp already created the connection (if any).
+    // Always clear the draw state and reset drag/pan.
+    setConnectionDrawSync(null);
+    setDragState({ isDragging: false, nodeId: null, startX: 0, startY: 0, offsetX: 0, offsetY: 0 });
     setIsPanning(false);
-    setTempConnection(null);
     didDragRef.current = false;
-  }, [dragState, connectionMode, connectionSource, agentsList, nodePositions, addConnection]);
+  }, []);
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
-    if (e.target === containerRef.current || (e.target as HTMLElement).classList.contains('canvas-bg')) {
-      setSelectedNodes(new Set());
-      if (e.button === 0) {
-        setIsPanning(true);
-        setPanStart({ x: e.clientX, y: e.clientY });
-      }
-      // Cancel connection mode on canvas click
-      if (connectionMode) {
-        setConnectionMode(null);
-        setConnectionSource(null);
-      }
+    // Nodes call stopPropagation, so this only fires on canvas background clicks
+    setSelectedNodes(new Set());
+    if (e.button === 0) {
+      setIsPanning(true);
+      setPanStart({ x: e.clientX, y: e.clientY });
     }
+    if (connectionDrawRef.current) setConnectionDrawSync(null);
   };
 
-  const handlePortDragStart = (e: React.MouseEvent, agentId: string) => {
-    e.stopPropagation();
-    const team = getAgentTeam(agentId);
-    if (!team) return;
-
-    setConnectionMode('drag');
-    setConnectionSource(agentId);
-    const pos = nodePositions[agentId];
-    if (pos) {
-      setTempConnection({ fromId: agentId, toX: pos.x + NODE_WIDTH / 2, toY: pos.y });
-    }
-  };
 
   const handleZoomIn = () => setZoom((z) => Math.min(z + 0.25, 3));
   const handleZoomOut = () => setZoom((z) => Math.max(z - 0.25, 0.25));
@@ -487,13 +373,6 @@ export function Topology() {
 
   const getPos = (id: string) => nodePositions[id] || { x: 0, y: 0 };
 
-  const getPortPosition = (agentId: string, port: 'input' | 'output') => {
-    const pos = getPos(agentId);
-    return {
-      x: pos.x + (port === 'output' ? NODE_WIDTH / 2 : -NODE_WIDTH / 2),
-      y: pos.y,
-    };
-  };
 
   return (
     <div className="h-full flex flex-col bg-background">
@@ -513,26 +392,14 @@ export function Topology() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {/* Connection mode indicator */}
-          {connectionMode && (
+          {/* Drawing indicator */}
+          {connectionDraw && (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/20 border border-primary/40 rounded-lg mr-2">
-              {connectionMode === 'click' ? (
-                <>
-                  <MousePointer className="w-4 h-4 text-primary" />
-                  <span className="text-xs text-primary font-medium">CLICK MODE</span>
-                  <button
-                    onClick={() => { setConnectionMode(null); setConnectionSource(null); }}
-                    className="ml-1 p-0.5 hover:bg-primary/20 rounded"
-                  >
-                    <X className="w-3 h-3 text-primary" />
-                  </button>
-                </>
-              ) : (
-                <>
-                  <Link2 className="w-4 h-4 text-tertiary" />
-                  <span className="text-xs text-tertiary font-medium">DRAG MODE</span>
-                </>
-              )}
+              <Link2 className="w-4 h-4 text-primary" />
+              <span className="text-xs text-primary font-medium">Suelta sobre un agente para conectar</span>
+              <button onClick={() => setConnectionDrawSync(null)} className="ml-1 p-0.5 hover:bg-primary/20 rounded">
+                <X className="w-3 h-3 text-primary" />
+              </button>
             </div>
           )}
 
@@ -571,8 +438,8 @@ export function Topology() {
 
       {/* Help bar */}
       <div className="px-4 py-1.5 bg-surface-container-low border-b border-outline-variant/10 flex items-center gap-4 text-[10px] text-on-surface-variant">
-        <span><kbd className="px-1 py-0.5 bg-surface-container rounded font-mono">C</kbd> Click-to-connect</span>
-        <span><kbd className="px-1 py-0.5 bg-surface-container rounded font-mono">Drag</kbd> port to connect</span>
+        <span><kbd className="px-1 py-0.5 bg-surface-container rounded font-mono">Drag handle •</kbd> conectar agentes</span>
+        <span><kbd className="px-1 py-0.5 bg-surface-container rounded font-mono">Drag nodo</kbd> mover</span>
         <span><kbd className="px-1 py-0.5 bg-surface-container rounded font-mono">Shift+Click</kbd> Multi-select</span>
         <span><kbd className="px-1 py-0.5 bg-surface-container rounded font-mono">Esc</kbd> Cancel</span>
         <span><kbd className="px-1 py-0.5 bg-surface-container rounded font-mono">Del</kbd> Delete</span>
@@ -587,7 +454,7 @@ export function Topology() {
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          style={{ cursor: isPanning ? 'grabbing' : 'default' }}
+          style={{ cursor: connectionDraw ? 'crosshair' : isPanning ? 'grabbing' : 'default', userSelect: 'none' }}
         >
           {/* Legend */}
           <div className="absolute top-3 left-3 z-20 bg-surface-container/90 backdrop-blur-sm rounded-lg p-2.5 border border-outline-variant/15">
@@ -624,48 +491,58 @@ export function Topology() {
               transformOrigin: '0 0',
             }}
           >
-            <svg className="absolute pointer-events-none" style={{ width: 4000, height: 4000, left: -1500, top: -1500 }}>
+            <svg className="absolute" style={{ width: 4000, height: 4000, left: -1500, top: -1500, pointerEvents: 'none' }}>
               <defs>
                 <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                  <polygon points="0 0, 10 3.5, 0 7" fill="#69f6b8" />
+                  <polygon points="0 0, 10 3.5, 0 7" fill="#97a9ff" />
                 </marker>
-                <marker id="arrowhead-temp" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                  <polygon points="0 0, 10 3.5, 0 7" fill="#97a9ff" opacity="0.6" />
+                <marker id="arrowhead-draw" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                  <polygon points="0 0, 10 3.5, 0 7" fill="#97a9ff" opacity="0.5" />
                 </marker>
               </defs>
 
-              {/* Team to orchestrator connections */}
+              {/* Team to orchestrator connections (decorative) */}
               {teamsList.map((team) => {
                 const pos = getPos(team.id);
                 return (
-                  <path key={`orch-${team.id}`} d={getBezierPath(500, 300, pos.x, pos.y)} stroke="#ff5637" strokeWidth="2" strokeOpacity="0.3" strokeDasharray="8 4" fill="none" />
+                  <path key={`orch-${team.id}`} d={getBezierPath(500, 300, pos.x, pos.y)} stroke="#ff5637" strokeWidth="2" strokeOpacity="0.2" strokeDasharray="8 4" fill="none" />
                 );
               })}
 
-              {/* Team to agent connections */}
-              {teamsList.map((team) => {
-                const teamPos = getPos(team.id);
-                const teamAgents = getAgentsByTeam(team.id);
-                return teamAgents.map((agent) => {
-                  const agentPos = getPos(agent.id);
-                  return (
-                    <path key={`team-${team.id}-${agent.id}`} d={getBezierPath(teamPos.x, teamPos.y, agentPos.x - NODE_WIDTH / 2, agentPos.y)} stroke="#5c403a" strokeWidth="1.5" strokeOpacity="0.4" fill="none" />
-                  );
-                });
-              })}
-
-              {/* Agent-to-agent connections */}
-              {selectedTeamConnections.map((conn) => {
-                const fromPort = getPortPosition(conn.fromAgentId, 'output');
-                const toPort = getPortPosition(conn.toAgentId, 'input');
+              {/* Freeform agent-to-agent connections */}
+              {localConnections.map((conn) => {
+                const from = nodePositions[conn.fromId];
+                const to = nodePositions[conn.toId];
+                if (!from || !to) return null;
                 return (
-                  <path key={conn.id} d={getBezierPath(fromPort.x, fromPort.y, toPort.x, toPort.y)} stroke="#69f6b8" strokeWidth="2.5" strokeOpacity="0.8" fill="none" markerEnd="url(#arrowhead)" />
+                  <path
+                    key={conn.id}
+                    d={getBezierPath(from.x + NODE_WIDTH / 2, from.y, to.x - NODE_WIDTH / 2, to.y)}
+                    stroke="#97a9ff"
+                    strokeWidth="2.5"
+                    strokeOpacity="0.85"
+                    fill="none"
+                    markerEnd="url(#arrowhead)"
+                  />
                 );
               })}
 
-              {/* Temp connection while dragging */}
-              {tempConnection && (
-                <path d={getBezierPath(getPortPosition(tempConnection.fromId, 'output').x, getPortPosition(tempConnection.fromId, 'output').y, tempConnection.toX, tempConnection.toY)} stroke="#97a9ff" strokeWidth="2" strokeOpacity="0.7" strokeDasharray="5 5" fill="none" markerEnd="url(#arrowhead-temp)" />
+              {/* Connection being drawn */}
+              {connectionDraw && nodePositions[connectionDraw.fromId] && (
+                <path
+                  d={getBezierPath(
+                    nodePositions[connectionDraw.fromId].x + NODE_WIDTH / 2,
+                    nodePositions[connectionDraw.fromId].y,
+                    connectionDraw.toX,
+                    connectionDraw.toY
+                  )}
+                  stroke="#97a9ff"
+                  strokeWidth="2"
+                  strokeOpacity="0.6"
+                  strokeDasharray="6 4"
+                  fill="none"
+                  markerEnd="url(#arrowhead-draw)"
+                />
               )}
             </svg>
 
@@ -709,12 +586,8 @@ export function Topology() {
               const pos = getPos(agent.id);
               const isSelected = selectedNodes.has(agent.id);
               const isHovered = hoveredAgent === agent.id;
-              const isSource = connectionSource === agent.id;
               const agentTeam = getAgentTeam(agent.id);
-              const hasTeam = !!agentTeam;
-
-              // Show ports if: has team AND (team selected OR connection source OR connection mode)
-              const showPorts = hasTeam && (selectedTeamId === agentTeam?.id || isSource || connectionMode);
+              const isDrawingFrom = connectionDraw?.fromId === agent.id;
 
               return (
                 <div
@@ -723,39 +596,40 @@ export function Topology() {
                   style={{ left: pos.x, top: pos.y }}
                   onMouseDown={(e) => handleNodeMouseDown(e, agent.id)}
                   onClick={(e) => handleNodeClick(e, agent.id)}
-                  onMouseEnter={() => { setHoveredAgent(agent.id); if (agentTeam?.id) setSelectedTeamId(agentTeam.id); }}
+                  onMouseEnter={() => setHoveredAgent(agent.id)}
                   onMouseLeave={() => setHoveredAgent(null)}
+                  onMouseUp={() => {
+                    const draw = connectionDrawRef.current;
+                    if (draw && draw.fromId !== agent.id) {
+                      setLocalConnections((prev) => {
+                        const exists = prev.some(
+                          (c) => (c.fromId === draw.fromId && c.toId === agent.id) ||
+                                 (c.fromId === agent.id && c.toId === draw.fromId)
+                        );
+                        if (exists) return prev;
+                        return [...prev, { id: crypto.randomUUID(), fromId: draw.fromId, toId: agent.id }];
+                      });
+                      setConnectionDrawSync(null);
+                    }
+                  }}
                 >
-                  <div className={`relative flex flex-col items-center p-3 rounded-xl bg-surface-container border-2 transition-all ${isSelected ? 'border-primary shadow-[0_0_20px_rgba(151,169,255,0.4)]' : isHovered ? 'border-primary/50' : 'border-transparent'}`}>
-                    {/* Input Port (left) - larger and easier to click */}
-                    {showPorts && (
-                      <div
-                        className={`absolute w-6 h-6 rounded-full flex items-center justify-center cursor-crosshair transition-all -translate-x-full ${
-                          isSource ? 'bg-secondary' : 'bg-tertiary/80 hover:bg-tertiary'
-                        } border-2 border-white/30`}
-                        style={{ left: -12, top: '50%', transform: 'translateY(-50%) translateX(-100%)' }}
-                        onClick={(e) => handleAgentPortClick(e, agent.id, 'input')}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        title="Input - click to connect"
-                      >
-                        <ArrowRight className="w-3 h-3 text-white" />
-                      </div>
-                    )}
-
-                    {/* Output Port (right) - larger and easier to click */}
-                    {showPorts && (
-                      <div
-                        className={`absolute w-6 h-6 rounded-full flex items-center justify-center cursor-crosshair transition-all translate-x-full ${
-                          isSource ? 'bg-primary' : 'bg-secondary/80 hover:bg-secondary'
-                        } border-2 border-white/30`}
-                        style={{ right: -12, top: '50%', transform: 'translateY(-50%) translateX(100%)' }}
-                        onClick={(e) => handleAgentPortClick(e, agent.id, 'output')}
-                        onMouseDown={(e) => { e.stopPropagation(); handlePortDragStart(e, agent.id); }}
-                        title="Output - click or drag to connect"
-                      >
-                        <ArrowRight className="w-3 h-3 text-white" />
-                      </div>
-                    )}
+                  <div className={`relative flex flex-col items-center p-3 rounded-xl bg-surface-container border-2 transition-all ${
+                    isDrawingFrom ? 'border-primary shadow-[0_0_20px_rgba(151,169,255,0.5)]' :
+                    isSelected ? 'border-primary shadow-[0_0_20px_rgba(151,169,255,0.4)]' :
+                    isHovered ? 'border-primary/50' : 'border-transparent'
+                  }`}>
+                    {/* Connection handle — drag to draw a connection */}
+                    <div
+                      className={`absolute w-4 h-4 rounded-full bg-primary border-2 border-background cursor-crosshair transition-all duration-150 ${isHovered || isDrawingFrom ? 'opacity-100 scale-100' : 'opacity-0 scale-75'}`}
+                      style={{ right: -8, top: '50%', transform: 'translateY(-50%)' }}
+                      title="Drag to connect"
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        const p = nodePositions[agent.id];
+                        if (p) setConnectionDrawSync({ fromId: agent.id, toX: p.x + NODE_WIDTH / 2, toY: p.y });
+                      }}
+                    />
 
                     {/* Agent Avatar with status */}
                     <div className="relative">
@@ -880,6 +754,29 @@ export function Topology() {
                         <span key={skill} className="px-1.5 py-0.5 bg-surface-container text-[10px] font-mono text-primary border border-primary/20 rounded">{skill}</span>
                       ))}
                     </div>
+                  </div>
+                  <div className="mb-3">
+                    <p className="text-[9px] text-on-surface-variant uppercase tracking-wider mb-1.5">Assign to Team</p>
+                    <select
+                      value={(selectedEntity.data as Agent).teamId || ''}
+                      onChange={(e) => {
+                        const agent = selectedEntity.data as Agent;
+                        const newTeamId = e.target.value;
+                        if (agent.teamId) removeAgentFromTeam(agent.id, agent.teamId);
+                        if (newTeamId) {
+                          addAgentToTeam(agent.id, newTeamId);
+                          updateAgent(agent.id, { teamId: newTeamId });
+                        } else {
+                          updateAgent(agent.id, { teamId: undefined });
+                        }
+                      }}
+                      className="w-full px-2 py-1.5 bg-surface-container text-xs font-mono text-on-surface rounded border border-outline-variant/30 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                    >
+                      <option value="">— No team —</option>
+                      {teamsList.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
                   </div>
                   <div className="grid grid-cols-2 gap-2 mb-3 text-[9px]">
                     <div className="p-2 bg-surface-container rounded">

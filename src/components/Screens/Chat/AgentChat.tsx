@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   Send, Bot, User, Terminal, Activity, Zap, Copy, Check, MoreVertical,
-  Search, Phone, Video, Settings, MessageSquare, ChevronDown, Clock
+  Search, Phone, Video, Settings, MessageSquare, ChevronDown, Clock, Trash2
 } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agentStore';
 import { useUIStore } from '../../../stores/uiStore';
@@ -39,7 +39,7 @@ export function AgentChat() {
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const [showAgentList, setShowAgentList] = useState(true);
+  const [showAgentList, setShowAgentList] = useState(!activeAgentId);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [typingAgents, setTypingAgents] = useState<Set<string>>(new Set());
@@ -84,14 +84,7 @@ export function AgentChat() {
     }
   }, [activeAgentId, activeAgent]);
 
-  // Sync messages when conversation is ready
-  useEffect(() => {
-    if (activeConversationId && conversations[activeConversationId]) {
-      setMessages(conversations[activeConversationId].messages);
-    }
-  }, [activeConversationId, conversations]);
-
-  // Load messages from conversation
+  // Sync messages when conversation changes
   useEffect(() => {
     if (activeConversationId && conversations[activeConversationId]) {
       setMessages(conversations[activeConversationId].messages);
@@ -335,7 +328,7 @@ export function AgentChat() {
                         showLabel={false}
                       />
                       {conv && conv.unread > 0 && (
-                        <span className="bg-primary text-primary-on-error text-[10px] font-bold px-1.5 rounded-full">
+                        <span className="bg-primary text-on-primary text-[10px] font-bold px-1.5 rounded-full">
                           {conv.unread}
                         </span>
                       )}
@@ -381,9 +374,10 @@ export function AgentChat() {
                 <div className="flex items-center gap-4">
                   <button
                     onClick={() => setShowAgentList(!showAgentList)}
-                    className="lg:hidden p-2 hover:bg-surface-container rounded"
+                    className="p-2 hover:bg-surface-container rounded transition-colors"
+                    title="Toggle agent list"
                   >
-                    <ChevronDown className="w-4 h-4 text-on-surface-variant" />
+                    <ChevronDown className={`w-4 h-4 text-on-surface-variant transition-transform ${showAgentList ? 'rotate-0' : '-rotate-90'}`} />
                   </button>
                   <AgentAvatar name={activeAgent.name} size="lg" />
                   <div>
@@ -637,7 +631,7 @@ export function AgentChat() {
                 Select an agent to start chatting
               </p>
               <button
-                onClick={() => setShowAgentList(true)}
+                onClick={() => setScreen('agents')}
                 className="mt-4 btn-primary"
               >
                 View Agents

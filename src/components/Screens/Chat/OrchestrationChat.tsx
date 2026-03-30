@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User } from 'lucide-react';
-import { useAgentStore } from '../../../stores/agentStore';
+import { Send, Bot, User, Zap, Plus, Activity, Terminal, Users } from 'lucide-react';
+import { useUIStore } from '../../../stores/uiStore';
+import { CreateAgentModal } from '../../Shared/CreateAgentModal';
 
 interface ChatMessage {
   id: string;
@@ -10,20 +11,19 @@ interface ChatMessage {
 }
 
 export function OrchestrationChat() {
-  const { agents, createAgent } = useAgentStore();
+  const { setScreen } = useUIStore();
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: '1',
       type: 'system',
-      content: 'Bienvenido a CodeOrchester. Puedo ayudarte a orquestar agentes IA para tareas de código.',
+      content: '// CODEORCHESTRATOR v1.0\n// Neural command interface initialized\n// Ready for agent orchestration',
       timestamp: new Date(),
     },
   ]);
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showNewAgentModal, setShowNewAgentModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const agentsList = Object.values(agents);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -47,14 +47,16 @@ export function OrchestrationChat() {
     setInput('');
     setIsProcessing(true);
 
-    // Simulate agent response
+    // Simulate agent response - Kinetic Terminal style
     setTimeout(() => {
       const agentMessage: ChatMessage = {
         id: crypto.randomUUID(),
         type: 'agent',
-        content: `Procesando: "${input}"\n\n` +
-          `Este es un mensaje de demostración. La integración con Claude CLI vendrá pronto.\n\n` +
-          `Para probar el flag trabajo_terminado, escribe: trabajo_terminado=false`,
+        content: `[${new Date().toLocaleTimeString()}] INFO: Processing task\n` +
+          `Command: "${input}"\n\n` +
+          `[${new Date().toLocaleTimeString()}] DEBUG: Neural pathway established\n` +
+          `Status: READY_FOR_ORCHESTRATION\n\n` +
+          `Test trabajo_terminado flag: write trabajo_terminado=false`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, agentMessage]);
@@ -71,70 +73,132 @@ export function OrchestrationChat() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="p-4 border-b border-outline-variant/15">
-        <h1 className="text-xl font-headline font-bold text-on-surface">Chat de Orquestación</h1>
-        <p className="text-on-surface-variant text-sm">Comunícate con tus agentes</p>
+      {/* Header - Kinetic Terminal style */}
+      <div className="p-4 border-b border-outline-variant/15 bg-surface-container-low">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-primary-container/20 rounded heat-gradient">
+              <Zap className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-headline font-bold text-on-surface tracking-tight uppercase">
+                ORCHESTRATION_CONTROL
+              </h1>
+              <p className="text-on-surface-variant text-xs uppercase tracking-wider font-mono">
+                Neural command interface
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setScreen('codemonitor')}
+              className="btn-secondary flex items-center gap-2 text-sm"
+            >
+              <Terminal className="w-4 h-4" />
+              MONITOR
+            </button>
+            <button
+              onClick={() => setScreen('agents')}
+              className="btn-secondary flex items-center gap-2 text-sm"
+            >
+              <Users className="w-4 h-4" />
+              AGENTS
+            </button>
+            <button
+              onClick={() => setShowNewAgentModal(true)}
+              className="btn-primary flex items-center gap-2 text-sm"
+            >
+              <Plus className="w-4 h-4" />
+              NEW_AGENT
+            </button>
+          </div>
+        </div>
+        {/* Active agents status bar */}
+        <div className="flex items-center gap-4 mt-3 pt-3 border-t border-outline-variant/15">
+          <div className="flex items-center gap-2">
+            <Activity className="w-4 h-4 text-primary" />
+            <span className="text-xs text-on-surface-variant uppercase tracking-wider">
+              Active Agents:
+            </span>
+            <span className="text-xs font-bold text-primary">00</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-on-surface-variant uppercase tracking-wider">
+              System Health:
+            </span>
+            <span className="text-xs font-bold text-secondary">98%</span>
+          </div>
+        </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-auto p-4 space-y-4">
+      {/* Messages - Stream Terminal style */}
+      <div className="flex-1 overflow-auto p-4 space-y-4 stream-terminal">
         {messages.map((message) => (
           <div
             key={message.id}
-            className={`flex gap-3 ${
-              message.type === 'user' ? 'flex-row-reverse' : ''
-            }`}
+            className={`flex gap-3 ${message.type === 'user' ? 'flex-row-reverse' : ''}`}
           >
-            {message.type === 'agent' ? (
-              <div className="w-8 h-8 rounded-md bg-primary-container/20 flex items-center justify-center">
+            {message.type === 'agent' && (
+              <div className="w-8 h-8 rounded bg-primary-container/20 flex items-center justify-center flex-shrink-0">
                 <Bot className="w-4 h-4 text-primary" />
               </div>
-            ) : message.type === 'user' ? (
-              <div className="w-8 h-8 rounded-md bg-surface-container flex items-center justify-center">
-                <User className="w-4 h-4 text-on-surface-variant" />
+            )}
+            {message.type === 'user' && (
+              <div className="w-8 h-8 rounded bg-surface-container-highest flex items-center justify-center flex-shrink-0">
+                <User className="w-4 h-4 text-on-surface" />
               </div>
-            ) : null}
+            )}
+            {message.type === 'system' && (
+              <div className="w-8 h-8 rounded bg-tertiary-container/20 flex items-center justify-center flex-shrink-0">
+                <Zap className="w-4 h-4 text-tertiary" />
+              </div>
+            )}
 
             <div
-              className={`max-w-[70%] rounded-lg p-3 ${
+              className={`max-w-[75%] rounded p-3 ${
                 message.type === 'system'
-                  ? 'bg-surface-container-low text-on-surface-variant text-sm'
+                  ? 'bg-surface-container-lowest text-tertiary text-xs'
                   : message.type === 'user'
                   ? 'bg-primary-container/20 text-on-surface'
                   : 'bg-surface-container text-on-surface'
               }`}
             >
-              <p className="whitespace-pre-wrap">{message.content}</p>
-              <p className="text-xs text-on-surface-variant mt-1 opacity-60">
-                {message.timestamp.toLocaleTimeString()}
+              <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed">
+                {message.content}
+              </pre>
+              <p className="text-xs text-on-surface-variant mt-2 opacity-60 font-mono">
+                [{message.timestamp.toLocaleTimeString()}]
               </p>
             </div>
           </div>
         ))}
         {isProcessing && (
           <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-md bg-primary-container/20 flex items-center justify-center">
+            <div className="w-8 h-8 rounded bg-primary-container/20 flex items-center justify-center">
               <Bot className="w-4 h-4 text-primary animate-pulse" />
             </div>
-            <div className="bg-surface-container rounded-lg p-3">
-              <p className="text-on-surface-variant animate-pulse">Procesando...</p>
+            <div className="bg-surface-container rounded p-3">
+              <div className="flex gap-1">
+                <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
             </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div className="p-4 border-t border-outline-variant/15">
+      {/* Input - Kinetic Terminal style */}
+      <div className="p-4 border-t border-outline-variant/15 bg-surface-container-low">
         <div className="flex gap-3">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyPress}
-            placeholder="Escribe un mensaje..."
+            placeholder="$ Enter command..."
             rows={1}
-            className="flex-1 px-4 py-2 bg-surface-container rounded-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+            className="flex-1 px-4 py-2 bg-surface-container-lowest rounded text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none font-mono text-sm"
           />
           <button
             onClick={handleSend}
@@ -145,6 +209,12 @@ export function OrchestrationChat() {
           </button>
         </div>
       </div>
+
+      {/* New Agent Modal */}
+      <CreateAgentModal
+        isOpen={showNewAgentModal}
+        onClose={() => setShowNewAgentModal(false)}
+      />
     </div>
   );
 }

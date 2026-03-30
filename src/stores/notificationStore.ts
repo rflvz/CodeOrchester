@@ -13,7 +13,7 @@ interface NotificationStore {
 
 const generateId = () => crypto.randomUUID();
 
-export const useNotificationStore = create<NotificationStore>((set, get) => ({
+export const useNotificationStore = create<NotificationStore>((set) => ({
   notifications: [],
   unreadCount: 0,
 

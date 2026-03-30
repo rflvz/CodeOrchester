@@ -31,34 +31,48 @@
 
 @layer components {
   .glass-modal {
-    @apply bg-surface-container-highest/80 backdrop-blur-xl;
+    @apply bg-surface-container-high/80 backdrop-blur-xl;
   }
 
   .surface-card {
-    @apply bg-surface-container rounded-md;
+    @apply bg-surface-container rounded;
   }
 
   .surface-elevated {
     @apply bg-surface-container-high;
   }
 
+  /* Ignis Command: Heat Gradient for Primary CTA - INTENSE */
   .btn-primary {
-    @apply bg-gradient-to-r from-primary to-primary-container text-on-primary font-medium px-4 py-2 rounded;
+    background: linear-gradient(135deg, #ff3319 0%, #c20144 100%);
+    @apply text-white font-medium px-4 py-2 rounded;
+    box-shadow: 0 4px 20px rgba(255, 51, 25, 0.4);
+  }
+
+  .btn-primary:hover {
+    @apply brightness-125 transition-all;
+    box-shadow: 0 6px 28px rgba(255, 51, 25, 0.5);
   }
 
   .btn-secondary {
-    @apply bg-surface-container-highest/20 border border-outline-variant/20 text-on-surface px-4 py-2 rounded;
-    @apply hover:bg-surface-container-highest/40 transition-colors;
+    @apply bg-surface-container-highest border border-outline-variant/20 text-on-surface px-4 py-2 rounded;
+    @apply hover:bg-surface-bright transition-colors;
+  }
+
+  /* Ghost Border fallback */
+  .btn-ghost {
+    @apply text-primary underline-offset-4 hover:underline;
   }
 
   .agent-card {
-    @apply bg-surface-container rounded-md p-4;
+    @apply bg-surface-container rounded p-4;
   }
 
   .status-chip {
     @apply px-2 py-1 rounded text-sm font-medium;
   }
 
+  /* Status colors - Ignis Command style */
   .status-idle {
     @apply text-on-surface-variant bg-surface-container-low;
   }
@@ -68,7 +82,7 @@
   }
 
   .status-success {
-    @apply text-secondary;
+    @apply text-tertiary;
   }
 
   .status-error {
@@ -77,6 +91,16 @@
 
   .status-processing {
     @apply text-tertiary animate-pulse;
+  }
+
+  /* Stream Terminal */
+  .stream-terminal {
+    @apply bg-surface-container-lowest font-mono text-sm;
+  }
+
+  /* Ambient Shadow for floating elements */
+  .ambient-shadow {
+    box-shadow: 0 32px 64px rgba(14, 14, 14, 0.4);
   }
 }
 
@@ -89,10 +113,10 @@
 }
 
 .xterm-viewport::-webkit-scrollbar-track {
-  background: #000000;
+  background: #0e0e0e;
 }
 
 .xterm-viewport::-webkit-scrollbar-thumb {
-  background: #23262a;
+  background: #3a3939;
   border-radius: 4px;
 }

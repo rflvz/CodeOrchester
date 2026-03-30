@@ -10,17 +10,19 @@ import {
   ChevronLeft,
   ChevronRight,
   Bell,
+  Settings2,
 } from 'lucide-react';
 import { useUIStore, Screen } from '../../stores/uiStore';
 import { useNotificationStore } from '../../stores/notificationStore';
 
 const navItems: { id: Screen; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
-  { id: 'topology', label: 'Topología', icon: <GitBranch className="w-5 h-5" /> },
-  { id: 'chat', label: 'Chat', icon: <MessageSquare className="w-5 h-5" /> },
-  { id: 'agents', label: 'Agentes', icon: <Users className="w-5 h-5" /> },
+  { id: 'topology', label: 'Topology', icon: <GitBranch className="w-5 h-5" /> },
+  { id: 'chat', label: 'Orchestration', icon: <MessageSquare className="w-5 h-5" /> },
+  { id: 'agents', label: 'Agents', icon: <Users className="w-5 h-5" /> },
   { id: 'skills', label: 'Skills', icon: <Wrench className="w-5 h-5" /> },
-  { id: 'automations', label: 'Automations', icon: <Workflow className="w-5 h-5" /> },
+  { id: 'skillconfig', label: 'Skill Params', icon: <Settings2 className="w-5 h-5" /> },
+  { id: 'automations', label: 'Automation', icon: <Workflow className="w-5 h-5" /> },
   { id: 'codemonitor', label: 'Terminal', icon: <Terminal className="w-5 h-5" /> },
 ];
 
@@ -37,8 +39,8 @@ export function Sidebar() {
       {/* Logo */}
       <div className="h-14 flex items-center justify-between px-4 border-b border-outline-variant/15">
         {!sidebarCollapsed && (
-          <span className="font-headline font-bold text-lg text-on-surface tracking-tight">
-            CodeOrchester
+          <span className="font-headline font-bold text-sm text-primary tracking-widest uppercase">
+            CODEORCHESTRATOR
           </span>
         )}
         <button
@@ -67,7 +69,7 @@ export function Sidebar() {
           >
             {item.icon}
             {!sidebarCollapsed && (
-              <span className="font-medium text-sm">{item.label}</span>
+              <span className="font-medium text-sm uppercase tracking-wider">{item.label}</span>
             )}
           </button>
         ))}
@@ -86,7 +88,7 @@ export function Sidebar() {
           <Bell className="w-5 h-5" />
           {!sidebarCollapsed && <span className="font-medium text-sm">Notificaciones</span>}
           {unreadCount > 0 && !sidebarCollapsed && (
-            <span className="ml-auto bg-error text-error-on-error text-xs font-bold px-1.5 py-0.5 rounded-full">
+            <span className="ml-auto bg-error text-on-error text-xs font-bold px-1.5 py-0.5 rounded-full">
               {unreadCount}
             </span>
           )}

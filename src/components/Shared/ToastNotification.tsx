@@ -1,10 +1,9 @@
-import { useEffect } from 'react';
 import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { Notification } from '../../types';
 
 export function ToastNotification() {
-  const { notifications, markAsRead, unreadCount } = useNotificationStore();
+  const { notifications, markAsRead } = useNotificationStore();
 
   const getIcon = (type: Notification['type']) => {
     switch (type) {
