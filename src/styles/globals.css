@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-background text-on-surface font-body m-0 p-0 overflow-hidden;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-surface-container-low;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-container-highest rounded;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-outline;
+  }
+}
+
+@layer components {
+  .glass-modal {
+    @apply bg-surface-container-highest/80 backdrop-blur-xl;
+  }
+
+  .surface-card {
+    @apply bg-surface-container rounded-md;
+  }
+
+  .surface-elevated {
+    @apply bg-surface-container-high;
+  }
+
+  .btn-primary {
+    @apply bg-gradient-to-r from-primary to-primary-container text-on-primary font-medium px-4 py-2 rounded;
+  }
+
+  .btn-secondary {
+    @apply bg-surface-container-highest/20 border border-outline-variant/20 text-on-surface px-4 py-2 rounded;
+    @apply hover:bg-surface-container-highest/40 transition-colors;
+  }
+
+  .agent-card {
+    @apply bg-surface-container rounded-md p-4;
+  }
+
+  .status-chip {
+    @apply px-2 py-1 rounded text-sm font-medium;
+  }
+
+  .status-idle {
+    @apply text-on-surface-variant bg-surface-container-low;
+  }
+
+  .status-active {
+    @apply text-primary bg-primary-container/20;
+  }
+
+  .status-success {
+    @apply text-secondary;
+  }
+
+  .status-error {
+    @apply text-error;
+  }
+
+  .status-processing {
+    @apply text-tertiary animate-pulse;
+  }
+}
+
+.xterm {
+  padding: 8px;
+}
+
+.xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+
+.xterm-viewport::-webkit-scrollbar-track {
+  background: #000000;
+}
+
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background: #23262a;
+  border-radius: 4px;
+}

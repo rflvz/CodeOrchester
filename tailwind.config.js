@@ -1,0 +1,47 @@
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        background: '#0c0e11',
+        surface: '#0c0e11',
+        'surface-container': '#171a1d',
+        'surface-container-high': '#1d2024',
+        'surface-container-highest': '#23262a',
+        'surface-container-low': '#111417',
+        'surface-container-lowest': '#000000',
+        'surface-bright': '#292c31',
+        primary: '#97a9ff',
+        'primary-container': '#859aff',
+        'on-primary': '#002283',
+        secondary: '#69f6b8',
+        'secondary-container': '#006c49',
+        'on-secondary': '#005a3c',
+        tertiary: '#ffb148',
+        'tertiary-container': '#f8a010',
+        'on-tertiary': '#573500',
+        error: '#ff6e84',
+        'error-container': '#a70138',
+        'on-error': '#490013',
+        'on-surface': '#f9f9fd',
+        'on-surface-variant': '#aaabaf',
+        outline: '#747579',
+        'outline-variant': '#46484b',
+        'surface-variant': '#23262a',
+      },
+      fontFamily: {
+        headline: ['Space Grotesk', 'sans-serif'],
+        body: ['Inter', 'sans-serif'],
+        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+      },
+      spacing: {
+        '4.5': '1.125rem',
+        '13': '3.25rem',
+        '15': '3.75rem',
+        '18': '4.5rem',
+      },
+    },
+  },
+  plugins: [],
+};
