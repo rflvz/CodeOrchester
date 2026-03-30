@@ -103,6 +103,39 @@ describe('DAW-551 – Chat navigation from AgentDashboard', () => {
     setTimeoutSpy.mockRestore();
   });
 
+  it('clicking CHAT on first agent selects the first one (not always the last)', async () => {
+    const user = userEvent.setup();
+
+    let firstId!: string;
+    act(() => {
+      firstId = useAgentStore.getState().createAgent({
+        name: 'AlphaFirst',
+        description: '',
+        status: 'idle',
+        teamId: null,
+        skills: [],
+        currentTask: null,
+        trabajoTerminado: false,
+      }).id;
+      useAgentStore.getState().createAgent({
+        name: 'BetaSecond',
+        description: '',
+        status: 'idle',
+        teamId: null,
+        skills: [],
+        currentTask: null,
+        trabajoTerminado: false,
+      });
+    });
+
+    render(<AgentDashboard />);
+    const chatButtons = screen.getAllByRole('button', { name: /chat/i });
+    await user.click(chatButtons[0]); // first agent
+
+    expect(useAgentStore.getState().activeAgentId).toBe(firstId);
+    expect(useUIStore.getState().currentScreen).toBe('chat');
+  });
+
   it('stores the correct agentId when multiple agents exist and a specific one is selected', async () => {
     const user = userEvent.setup();
 
@@ -137,5 +170,118 @@ describe('DAW-551 – Chat navigation from AgentDashboard', () => {
 
     expect(useAgentStore.getState().activeAgentId).toBe(secondId);
     expect(useUIStore.getState().currentScreen).toBe('chat');
+  });
+
+  it('switching active agent updates activeAgentId correctly (no stale reference)', async () => {
+    const user = userEvent.setup();
+
+    let idA!: string;
+    let idB!: string;
+    act(() => {
+      idA = useAgentStore.getState().createAgent({
+        name: 'AgentA',
+        description: '',
+        status: 'idle',
+        teamId: null,
+        skills: [],
+        currentTask: null,
+        trabajoTerminado: false,
+      }).id;
+      idB = useAgentStore.getState().createAgent({
+        name: 'AgentB',
+        description: '',
+        status: 'active',
+        teamId: null,
+        skills: [],
+        currentTask: null,
+        trabajoTerminado: false,
+      }).id;
+    });
+
+    render(<AgentDashboard />);
+    const chatButtons = screen.getAllByRole('button', { name: /chat/i });
+
+    // First click — select agent A
+    await user.click(chatButtons[0]);
+    expect(useAgentStore.getState().activeAgentId).toBe(idA);
+
+    // Navigate back to agents screen, re-render
+    act(() => { useUIStore.getState().setScreen('agents'); });
+
+    // Second click — select agent B
+    await user.click(chatButtons[1]);
+    expect(useAgentStore.getState().activeAgentId).toBe(idB);
+    expect(useUIStore.getState().currentScreen).toBe('chat');
+  });
+
+  it('activeAgentId is set BEFORE screen changes (no window where activeAgentId is null while on chat)', async () => {
+    const user = userEvent.setup();
+
+    let agentId!: string;
+    act(() => {
+      agentId = useAgentStore.getState().createAgent({
+        name: 'OrderBot',
+        description: '',
+        status: 'idle',
+        teamId: null,
+        skills: [],
+        currentTask: null,
+        trabajoTerminado: false,
+      }).id;
+    });
+
+    render(<AgentDashboard />);
+
+    // Intercept store updates to capture the order they happen
+    const callOrder: string[] = [];
+    const origSetActive = useAgentStore.getState().setActiveAgent;
+    const origSetScreen = useUIStore.getState().setScreen;
+
+    useAgentStore.setState({
+      setActiveAgent: (id) => {
+        callOrder.push('setActiveAgent');
+        origSetActive(id);
+      },
+    });
+    useUIStore.setState({
+      setScreen: (screen) => {
+        callOrder.push('setScreen');
+        origSetScreen(screen);
+      },
+    });
+
+    const chatButton = screen.getByRole('button', { name: /chat/i });
+    await user.click(chatButton);
+
+    // setActiveAgent MUST be called before setScreen
+    expect(callOrder[0]).toBe('setActiveAgent');
+    expect(callOrder[1]).toBe('setScreen');
+    expect(useAgentStore.getState().activeAgentId).toBe(agentId);
+    expect(useUIStore.getState().currentScreen).toBe('chat');
+  });
+
+  it('agent status is preserved in store after chat navigation', async () => {
+    const user = userEvent.setup();
+
+    act(() => {
+      useAgentStore.getState().createAgent({
+        name: 'ActiveBot',
+        description: '',
+        status: 'active',
+        teamId: null,
+        skills: ['coding'],
+        currentTask: 'Building feature X',
+        trabajoTerminado: false,
+      });
+    });
+
+    render(<AgentDashboard />);
+    await user.click(screen.getByRole('button', { name: /chat/i }));
+
+    const activeAgent = useAgentStore.getState().agents[useAgentStore.getState().activeAgentId!];
+    // Status and data must not be corrupted by navigation
+    expect(activeAgent.status).toBe('active');
+    expect(activeAgent.skills).toContain('coding');
+    expect(activeAgent.currentTask).toBe('Building feature X');
   });
 });
