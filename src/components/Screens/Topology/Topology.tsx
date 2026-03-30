@@ -162,6 +162,39 @@ export function Topology() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Global mouseup listener while a connection is being drawn (DAW-552)
+  useEffect(() => {
+    if (!connectionDraw) return;
+
+    const handler = (e: MouseEvent) => {
+      const draw = connectionDrawRef.current;
+      if (!draw) return;
+
+      // Find the agent node under cursor regardless of which child element was the event target
+      const elements = document.elementsFromPoint(e.clientX, e.clientY);
+      const agentEl = elements.find(
+        (el) => el instanceof HTMLElement && (el as HTMLElement).dataset.agentId
+      ) as HTMLElement | undefined;
+
+      const targetId = agentEl?.dataset.agentId;
+      if (targetId && targetId !== draw.fromId) {
+        setLocalConnections((prev) => {
+          const exists = prev.some(
+            (c) =>
+              (c.fromId === draw.fromId && c.toId === targetId) ||
+              (c.fromId === targetId && c.toId === draw.fromId)
+          );
+          if (exists) return prev;
+          return [...prev, { id: crypto.randomUUID(), fromId: draw.fromId, toId: targetId }];
+        });
+      }
+      setConnectionDrawSync(null);
+    };
+
+    window.addEventListener('mouseup', handler);
+    return () => window.removeEventListener('mouseup', handler);
+  }, [connectionDraw]);
+
   const getAgentsByTeam = (teamId: string | null) => {
     return agentsList.filter((a) => a.teamId === teamId);
   };
@@ -592,26 +625,13 @@ export function Topology() {
               return (
                 <div
                   key={agent.id}
+                  data-agent-id={agent.id}
                   className={`absolute transform -translate-x-1/2 -translate-y-1/2 transition-all duration-100 ${isSelected ? 'z-20' : 'z-10'}`}
                   style={{ left: pos.x, top: pos.y }}
                   onMouseDown={(e) => handleNodeMouseDown(e, agent.id)}
                   onClick={(e) => handleNodeClick(e, agent.id)}
                   onMouseEnter={() => setHoveredAgent(agent.id)}
                   onMouseLeave={() => setHoveredAgent(null)}
-                  onMouseUp={() => {
-                    const draw = connectionDrawRef.current;
-                    if (draw && draw.fromId !== agent.id) {
-                      setLocalConnections((prev) => {
-                        const exists = prev.some(
-                          (c) => (c.fromId === draw.fromId && c.toId === agent.id) ||
-                                 (c.fromId === agent.id && c.toId === draw.fromId)
-                        );
-                        if (exists) return prev;
-                        return [...prev, { id: crypto.randomUUID(), fromId: draw.fromId, toId: agent.id }];
-                      });
-                      setConnectionDrawSync(null);
-                    }
-                  }}
                 >
                   <div className={`relative flex flex-col items-center p-3 rounded-xl bg-surface-container border-2 transition-all ${
                     isDrawingFrom ? 'border-primary shadow-[0_0_20px_rgba(151,169,255,0.5)]' :
@@ -620,7 +640,7 @@ export function Topology() {
                   }`}>
                     {/* Connection handle — drag to draw a connection */}
                     <div
-                      className={`absolute w-4 h-4 rounded-full bg-primary border-2 border-background cursor-crosshair transition-all duration-150 ${isHovered || isDrawingFrom ? 'opacity-100 scale-100' : 'opacity-0 scale-75'}`}
+                      className={`absolute w-4 h-4 rounded-full bg-primary border-2 border-background cursor-crosshair transition-all duration-150 ${isHovered || isDrawingFrom ? 'opacity-100 scale-125' : 'opacity-30 scale-100'}`}
                       style={{ right: -8, top: '50%', transform: 'translateY(-50%)' }}
                       title="Drag to connect"
                       onMouseDown={(e) => {

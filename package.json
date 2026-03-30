@@ -9,7 +9,9 @@
     "electron:build": "tsc -p electron/tsconfig.json",
     "build:vite": "vite build",
     "build": "npm run electron:build && vite build && electron-builder",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "claude",
@@ -31,6 +33,9 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^20.19.37",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
@@ -39,10 +44,12 @@
     "concurrently": "^8.2.2",
     "electron": "^31.7.7",
     "electron-builder": "^25.1.8",
+    "jsdom": "^29.0.1",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3",
     "vite": "^5.4.21",
+    "vitest": "^4.1.2",
     "wait-on": "^7.2.0"
   },
   "build": {
