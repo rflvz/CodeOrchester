@@ -40,10 +40,7 @@ export function AgentDashboard() {
 
   const handleChatAgent = (agentId: string) => {
     setActiveAgent(agentId);
-    // Small delay to ensure state propagates
-    setTimeout(() => {
-      setScreen('chat');
-    }, 50);
+    setScreen('chat');
   };
 
   const handleViewTopology = (agentId: string) => {
