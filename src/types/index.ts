@@ -18,7 +18,22 @@ export interface Team {
   description: string;
   agents: string[];
   topology: 'hierarchical' | 'mesh' | 'star' | 'chain';
+  connections: AgentConnection[];
   createdAt: Date;
+}
+
+export interface AgentConnection {
+  id: string;
+  fromAgentId: string;
+  toAgentId: string;
+  label?: string;
+}
+
+export interface SkillParameter {
+  name: string;
+  type: 'string' | 'number' | 'boolean' | 'array';
+  required: boolean;
+  defaultValue?: string | number | boolean | string[];
 }
 
 export interface Skill {
@@ -27,6 +42,7 @@ export interface Skill {
   description: string;
   category: SkillCategory;
   prompt: string;
+  parameters?: SkillParameter[];
 }
 
 export type SkillCategory =

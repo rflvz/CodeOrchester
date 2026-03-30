@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type Screen = 'dashboard' | 'topology' | 'chat' | 'agents' | 'skills' | 'automations' | 'codemonitor' | 'settings';
+export type Screen = 'dashboard' | 'topology' | 'chat' | 'agents' | 'skills' | 'skillconfig' | 'automations' | 'codemonitor' | 'settings';
 
 interface UIStore {
   currentScreen: Screen;

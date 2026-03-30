@@ -34,7 +34,7 @@ export function GlassModal({ isOpen, onClose, title, children, width = 'md' }: G
     sm: 'max-w-sm',
     md: 'max-w-md',
     lg: 'max-w-lg',
-    xl: 'max-w-xl',
+    xl: 'max-w-2xl',
   };
 
   return (
@@ -44,20 +44,18 @@ export function GlassModal({ isOpen, onClose, title, children, width = 'md' }: G
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      {/* Kinetic Terminal: Glassmorphism backdrop */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-xl" />
       <div
         ref={modalRef}
-        className={`relative glass-modal rounded-lg p-6 w-full ${widthClasses[width]} shadow-2xl`}
-        style={{
-          boxShadow: '0 40px 40px rgba(151, 169, 255, 0.06)',
-        }}
+        className={`relative bg-surface-container-high/90 backdrop-blur-xl rounded-lg p-6 w-full ${widthClasses[width]} ambient-shadow`}
       >
         {title && (
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-headline font-semibold text-on-surface">{title}</h2>
+            <h2 className="text-lg font-headline font-semibold text-on-surface tracking-tight">{title}</h2>
             <button
               onClick={onClose}
-              className="p-1 rounded hover:bg-surface-container-high transition-colors"
+              className="p-1.5 rounded hover:bg-surface-container-highest transition-colors"
             >
               <X className="w-5 h-5 text-on-surface-variant" />
             </button>

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Team } from '../types';
+import { Team, AgentConnection } from '../types';
 
 interface TeamStore {
   teams: Record<string, Team>;
@@ -11,6 +11,8 @@ interface TeamStore {
   setActiveTeam: (id: string | null) => void;
   addAgentToTeam: (agentId: string, teamId: string) => void;
   removeAgentFromTeam: (agentId: string, teamId: string) => void;
+  addConnection: (teamId: string, connection: Omit<AgentConnection, 'id'>) => void;
+  removeConnection: (teamId: string, connectionId: string) => void;
 }
 
 const generateId = () => crypto.randomUUID();
@@ -77,6 +79,42 @@ export const useTeamStore = create<TeamStore>((set) => ({
         teams: {
           ...state.teams,
           [teamId]: { ...team, agents: team.agents.filter((id) => id !== agentId) },
+        },
+      };
+    });
+  },
+
+  addConnection: (teamId, connection) => {
+    set((state) => {
+      const team = state.teams[teamId];
+      if (!team) return state;
+      const exists = team.connections.some(
+        (c) => c.fromAgentId === connection.fromAgentId && c.toAgentId === connection.toAgentId
+      );
+      if (exists) return state;
+      return {
+        teams: {
+          ...state.teams,
+          [teamId]: {
+            ...team,
+            connections: [...team.connections, { ...connection, id: generateId() }],
+          },
+        },
+      };
+    });
+  },
+
+  removeConnection: (teamId, connectionId) => {
+    set((state) => {
+      const team = state.teams[teamId];
+      if (!team) return state;
+      return {
+        teams: {
+          ...state.teams,
+          [teamId]: {
+            ...team,
+            connections: team.connections.filter((c) => c.id !== connectionId),
+          },
         },
       };
     });

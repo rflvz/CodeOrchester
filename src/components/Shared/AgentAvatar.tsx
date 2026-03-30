@@ -6,7 +6,7 @@ interface AgentAvatarProps {
   isAgent?: boolean;
 }
 
-export function AgentAvatar({ name, size = 'md', isAgent = true }: AgentAvatarProps) {
+export function AgentAvatar({ name: _name, size = 'md', isAgent = true }: AgentAvatarProps) {
   const sizeClasses = {
     sm: 'w-8 h-8',
     md: 'w-10 h-10',
@@ -18,13 +18,6 @@ export function AgentAvatar({ name, size = 'md', isAgent = true }: AgentAvatarPr
     md: 'w-5 h-5',
     lg: 'w-7 h-7',
   };
-
-  const initials = name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
 
   return (
     <div

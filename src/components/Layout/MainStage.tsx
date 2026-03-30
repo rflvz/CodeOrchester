@@ -3,7 +3,9 @@ import { Dashboard } from '../Screens/Dashboard/Dashboard';
 import { Topology } from '../Screens/Topology/Topology';
 import { OrchestrationChat } from '../Screens/Chat/OrchestrationChat';
 import { AgentChat } from '../Screens/Chat/AgentChat';
+import { AgentDashboard } from '../Screens/Agents/AgentDashboard';
 import { SkillsLibrary } from '../Screens/Skills/SkillsLibrary';
+import { SkillConfig } from '../Screens/Skills/SkillConfig';
 import { AutomationEditor } from '../Screens/Automations/AutomationEditor';
 import { CodeMonitor } from '../Screens/CodeMonitor/CodeMonitor';
 import { Settings } from '../Screens/Settings/Settings';
@@ -18,11 +20,13 @@ export function MainStage() {
       case 'topology':
         return <Topology />;
       case 'chat':
-        return <OrchestrationChat />;
-      case 'agents':
         return <AgentChat />;
+      case 'agents':
+        return <AgentDashboard />;
       case 'skills':
         return <SkillsLibrary />;
+      case 'skillconfig':
+        return <SkillConfig onBack={() => useUIStore.getState().setScreen('skills')} />;
       case 'automations':
         return <AutomationEditor />;
       case 'codemonitor':
