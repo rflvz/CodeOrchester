@@ -167,14 +167,14 @@ export function AgentChat() {
 
     // Check for trabajo_terminado flag
     if (input.includes('trabajo_terminado=false')) {
-      if (activeAgentId) {
-        updateAgent(activeAgentId, { status: 'error', trabajoTerminado: false });
+      if (agent?.id) {
+        updateAgent(agent.id, { status: 'error', trabajoTerminado: false });
       }
       return `[${new Date().toLocaleTimeString()}] Estado actualizado: trabajo_terminado=false\nEl agente ${agent?.name} ha reportado un error en la tarea.`;
     }
     if (input.includes('trabajo_terminado=true')) {
-      if (activeAgentId) {
-        updateAgent(activeAgentId, { status: 'success', trabajoTerminado: true });
+      if (agent?.id) {
+        updateAgent(agent.id, { status: 'success', trabajoTerminado: true });
       }
       return `[${new Date().toLocaleTimeString()}] Estado actualizado: trabajo_terminado=true\nEl agente ${agent?.name} ha completado la tarea exitosamente.`;
     }

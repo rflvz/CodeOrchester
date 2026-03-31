@@ -20,12 +20,15 @@ const api: ElectronAPI = {
   showNotification: (title, body) => ipcRenderer.invoke('show-notification', title, body),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   onPtyData: (callback) => {
+    ipcRenderer.removeAllListeners('pty-data');
     ipcRenderer.on('pty-data', (_event, data) => callback(data));
   },
   onPtyExit: (callback) => {
+    ipcRenderer.removeAllListeners('pty-exit');
     ipcRenderer.on('pty-exit', (_event, data) => callback(data));
   },
   onTrabajoTerminado: (callback) => {
+    ipcRenderer.removeAllListeners('trabajo-terminado');
     ipcRenderer.on('trabajo-terminado', (_event, data) => callback(data));
   },
 };

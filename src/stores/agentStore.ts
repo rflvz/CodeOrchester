@@ -60,22 +60,17 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
 
   setTrabajoTerminado: (id, value) => {
-    const state = get();
-    const agent = state.agents[id];
-    if (!agent) return;
-
-    const status: AgentStatus = value ? 'success' : 'error';
-
-    set((state) => ({
-      agents: {
-        ...state.agents,
-        [id]: {
-          ...agent,
-          trabajoTerminado: value,
-          status,
+    set((state) => {
+      const agent = state.agents[id];
+      if (!agent) return state;
+      const status: AgentStatus = value ? 'success' : 'idle';
+      return {
+        agents: {
+          ...state.agents,
+          [id]: { ...agent, trabajoTerminado: value, status },
         },
-      },
-    }));
+      };
+    });
   },
 
   setAgentStatus: (id, status) => {

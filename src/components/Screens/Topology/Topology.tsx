@@ -191,8 +191,10 @@ export function Topology() {
       setConnectionDrawSync(null);
     };
 
-    window.addEventListener('mouseup', handler);
-    return () => window.removeEventListener('mouseup', handler);
+    // Capture phase ensures this fires before React's synthetic onMouseUp on the canvas
+    // which would clear connectionDrawRef before we can read it (bubble-phase ordering bug).
+    window.addEventListener('mouseup', handler, true);
+    return () => window.removeEventListener('mouseup', handler, true);
   }, [connectionDraw]);
 
   const getAgentsByTeam = (teamId: string | null) => {
@@ -336,7 +338,7 @@ export function Topology() {
         setPanStart({ x: e.clientX, y: e.clientY });
       }
     },
-    [dragState, isPanning, panStart, zoom]
+    [dragState, isPanning, panStart, zoom, pan]
   );
 
   const handleMouseUp = useCallback(() => {
@@ -524,7 +526,7 @@ export function Topology() {
               transformOrigin: '0 0',
             }}
           >
-            <svg className="absolute" style={{ width: 4000, height: 4000, left: -1500, top: -1500, pointerEvents: 'none' }}>
+            <svg className="absolute" style={{ width: 4000, height: 4000, left: 0, top: 0, pointerEvents: 'none' }}>
               <defs>
                 <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
                   <polygon points="0 0, 10 3.5, 0 7" fill="#97a9ff" />
@@ -787,7 +789,7 @@ export function Topology() {
                           addAgentToTeam(agent.id, newTeamId);
                           updateAgent(agent.id, { teamId: newTeamId });
                         } else {
-                          updateAgent(agent.id, { teamId: undefined });
+                          updateAgent(agent.id, { teamId: null });
                         }
                       }}
                       className="w-full px-2 py-1.5 bg-surface-container text-xs font-mono text-on-surface rounded border border-outline-variant/30 focus:outline-none focus:ring-1 focus:ring-primary/50"

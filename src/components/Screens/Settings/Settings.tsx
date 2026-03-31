@@ -9,6 +9,10 @@ export function Settings() {
   const [minimaxAppId, setMinimaxAppId] = useState('');
   const [claudeCliPath, setClaudeCliPath] = useState('claude');
   const [claudeWorkDir, setClaudeWorkDir] = useState('');
+  const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg'>('md');
+  const [accentColor, setAccentColor] = useState<'indigo' | 'violet' | 'cyan' | 'emerald'>('indigo');
+  const [density, setDensity] = useState<'compact' | 'normal' | 'relaxed'>('normal');
+  const [animationsEnabled, setAnimationsEnabled] = useState(true);
 
   const sections = [
     { id: 'minimax', label: 'API MiniMax', icon: <Key className="w-4 h-4" /> },
@@ -236,7 +240,97 @@ export function Settings() {
           </div>
         )}
 
-        {activeSection !== 'general' && activeSection !== 'notifications' && activeSection !== 'about' && (
+        {activeSection === 'appearance' && (
+          <div className="space-y-6">
+            <div className="bg-surface-container p-6 rounded-md border border-outline-variant/15">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-primary-container/20 rounded">
+                  <Palette className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-headline font-semibold text-on-surface">Tamaño de fuente</h3>
+                  <p className="text-on-surface-variant text-sm">Ajusta el tamaño del texto en la interfaz</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                {(['sm', 'md', 'lg'] as const).map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => setFontSize(size)}
+                    className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors border ${
+                      fontSize === size
+                        ? 'bg-primary-container/20 text-primary border-primary/30'
+                        : 'text-on-surface-variant border-outline-variant/30 hover:bg-surface-container-high'
+                    }`}
+                  >
+                    {size === 'sm' ? 'Pequeño' : size === 'md' ? 'Mediano' : 'Grande'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-surface-container p-6 rounded-md border border-outline-variant/15">
+              <h3 className="font-headline font-semibold text-on-surface mb-4">Color de acento</h3>
+              <div className="flex gap-6">
+                {([
+                  { id: 'indigo' as const, label: 'Índigo', bg: 'bg-indigo-500' },
+                  { id: 'violet' as const, label: 'Violeta', bg: 'bg-violet-500' },
+                  { id: 'cyan' as const, label: 'Cian', bg: 'bg-cyan-500' },
+                  { id: 'emerald' as const, label: 'Esmeralda', bg: 'bg-emerald-500' },
+                ]).map((color) => (
+                  <button
+                    key={color.id}
+                    onClick={() => setAccentColor(color.id)}
+                    className="flex flex-col items-center gap-2"
+                    title={color.label}
+                  >
+                    <div className={`w-10 h-10 rounded-full ${color.bg} transition-all ${
+                      accentColor === color.id ? 'ring-2 ring-offset-2 ring-offset-surface ring-white scale-110' : 'opacity-60 hover:opacity-90'
+                    }`} />
+                    <span className="text-xs text-on-surface-variant">{color.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-surface-container p-6 rounded-md border border-outline-variant/15">
+              <h3 className="font-headline font-semibold text-on-surface mb-4">Densidad de interfaz</h3>
+              <div className="flex gap-3">
+                {(['compact', 'normal', 'relaxed'] as const).map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setDensity(d)}
+                    className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors border ${
+                      density === d
+                        ? 'bg-primary-container/20 text-primary border-primary/30'
+                        : 'text-on-surface-variant border-outline-variant/30 hover:bg-surface-container-high'
+                    }`}
+                  >
+                    {d === 'compact' ? 'Compacto' : d === 'normal' ? 'Normal' : 'Relajado'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="surface-card p-4 flex items-center justify-between">
+              <div>
+                <h3 className="font-medium text-on-surface">Animaciones</h3>
+                <p className="text-on-surface-variant text-sm">Activar transiciones y animaciones de interfaz</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={animationsEnabled}
+                  onChange={(e) => setAnimationsEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-surface-container-high rounded-full peer peer-checked:bg-primary peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface after:rounded-full after:h-5 after:w-5 after:transition-all" />
+              </label>
+            </div>
+          </div>
+        )}
+
+        {activeSection !== 'general' && activeSection !== 'notifications' && activeSection !== 'about' && activeSection !== 'minimax' && activeSection !== 'claude' && activeSection !== 'appearance' && (
           <div className="surface-card p-8 text-center">
             <p className="text-on-surface-variant">
               Sección "{sections.find((s) => s.id === activeSection)?.label}" en desarrollo

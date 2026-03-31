@@ -2,6 +2,7 @@ import {
   LayoutDashboard,
   GitBranch,
   MessageSquare,
+  Cpu,
   Users,
   Wrench,
   Workflow,
@@ -18,7 +19,8 @@ import { useNotificationStore } from '../../stores/notificationStore';
 const navItems: { id: Screen; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
   { id: 'topology', label: 'Topology', icon: <GitBranch className="w-5 h-5" /> },
-  { id: 'chat', label: 'Orchestration', icon: <MessageSquare className="w-5 h-5" /> },
+  { id: 'chat', label: 'Agent Chat', icon: <MessageSquare className="w-5 h-5" /> },
+  { id: 'orchestration', label: 'Orchestration', icon: <Cpu className="w-5 h-5" /> },
   { id: 'agents', label: 'Agents', icon: <Users className="w-5 h-5" /> },
   { id: 'skills', label: 'Skills', icon: <Wrench className="w-5 h-5" /> },
   { id: 'skillconfig', label: 'Skill Params', icon: <Settings2 className="w-5 h-5" /> },

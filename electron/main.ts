@@ -57,6 +57,13 @@ app.on('window-all-closed', () => {
 
 // IPC Handlers
 ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string) => {
+  // Kill any existing session with the same ID to prevent leaks
+  const existing = ptys.get(sessionId);
+  if (existing) {
+    try { existing.kill(); } catch { /* ignore */ }
+    ptys.delete(sessionId);
+  }
+
   const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
   const pty = spawn(shell, [], {
     cwd: cwd || os.homedir(),
