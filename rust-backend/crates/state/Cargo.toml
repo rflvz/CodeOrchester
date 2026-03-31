@@ -15,3 +15,6 @@ thiserror = "1"
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 tempfile = "3"
+
+[[test]]
+name = "smoke_test"
