@@ -162,10 +162,11 @@ export function Topology() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Global mouseup listener while a connection is being drawn (DAW-552)
+  // Global mouseup listener for connection drawing (DAW-552)
+  // - Always active ([] deps) so there's no timing gap between mousedown and listener install
+  // - Capture phase: fires before canvas onMouseUp clears connectionDrawRef
+  // - Reads from ref (not state) so it always sees the current value synchronously
   useEffect(() => {
-    if (!connectionDraw) return;
-
     const handler = (e: MouseEvent) => {
       const draw = connectionDrawRef.current;
       if (!draw) return;
@@ -191,10 +192,9 @@ export function Topology() {
       setConnectionDrawSync(null);
     };
 
-    // Use capture phase so this fires before handleMouseUp (canvas onMouseUp) clears connectionDrawRef
     window.addEventListener('mouseup', handler, { capture: true });
     return () => window.removeEventListener('mouseup', handler, { capture: true });
-  }, [connectionDraw]);
+  }, []);
 
   const getAgentsByTeam = (teamId: string | null) => {
     return agentsList.filter((a) => a.teamId === teamId);
@@ -487,7 +487,15 @@ export function Topology() {
           onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
+          onMouseLeave={() => {
+            // Cancel node dragging and panning but preserve connection draw so the
+            // global window capture listener can still create the connection if the
+            // user releases the mouse outside the canvas bounds.
+            if (!connectionDrawRef.current) setConnectionDrawSync(null);
+            setDragState({ isDragging: false, nodeId: null, startX: 0, startY: 0, offsetX: 0, offsetY: 0 });
+            setIsPanning(false);
+            didDragRef.current = false;
+          }}
           style={{ cursor: connectionDraw ? 'crosshair' : isPanning ? 'grabbing' : 'default', userSelect: 'none' }}
         >
           {/* Legend */}
