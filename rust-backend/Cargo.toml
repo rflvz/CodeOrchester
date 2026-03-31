@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/ipc", "crates/state"]
+resolver = "2"
