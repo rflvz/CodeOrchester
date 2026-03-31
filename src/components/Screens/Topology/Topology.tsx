@@ -191,8 +191,9 @@ export function Topology() {
       setConnectionDrawSync(null);
     };
 
-    window.addEventListener('mouseup', handler);
-    return () => window.removeEventListener('mouseup', handler);
+    // Use capture phase so this fires before handleMouseUp (canvas onMouseUp) clears connectionDrawRef
+    window.addEventListener('mouseup', handler, { capture: true });
+    return () => window.removeEventListener('mouseup', handler, { capture: true });
   }, [connectionDraw]);
 
   const getAgentsByTeam = (teamId: string | null) => {
