@@ -1,19 +1,19 @@
 [package]
-name = "ipc"
-version = "0.1.0"
-edition = "2021"
+name        = "ipc"
+version     = "0.1.0"
+edition     = "2021"
+description = "WebSocket IPC layer between the Rust backend and Electron renderer (DAW-544)"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.24"
-futures-util = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tracing = "0.1"
-uuid = { version = "1", features = ["v4"] }
+tokio      = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+tracing    = { workspace = true }
+thiserror  = { workspace = true }
+
+# WebSocket server / client
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+futures-util      = "0.3"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.24"
-futures-util = "0.3"
-serde_json = "1"
+tokio = { workspace = true }

@@ -1,8 +1,8 @@
 [package]
-name        = "minimax"
+name        = "claude-cli"
 version     = "0.1.0"
 edition     = "2021"
-description = "MiniMax API client with rate-limiting and retry logic (DAW-548)"
+description = "Robust integration with the Claude CLI binary (DAW-547)"
 
 [dependencies]
 tokio      = { workspace = true }
@@ -10,9 +10,7 @@ serde      = { workspace = true }
 serde_json = { workspace = true }
 tracing    = { workspace = true }
 thiserror  = { workspace = true }
-
-# HTTP client for MiniMax REST API
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+uuid       = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
