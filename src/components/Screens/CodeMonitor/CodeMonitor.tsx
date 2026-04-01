@@ -526,9 +526,9 @@ export function CodeMonitor() {
           )}
 
           {/* Editor Area */}
-          <div className={`flex-1 overflow-hidden ${splitView ? 'flex' : ''}`}>
+          <div className={`flex-1 overflow-hidden ${splitView ? 'flex flex-row' : 'flex flex-col'}`}>
             {/* Main Editor */}
-            <div className={`${splitView ? 'w-1/2 border-r border-outline-variant/15' : 'w-full'} flex flex-col bg-surface-container-lowest`}>
+            <div className={`${splitView ? 'w-1/2 border-r border-outline-variant/15' : 'flex-1'} flex flex-col bg-surface-container-lowest`}>
               {activeEditor ? (
                 <div className="flex-1 flex flex-col">
                   <div className="p-2 bg-surface-container text-xs text-on-surface-variant flex items-center justify-between">

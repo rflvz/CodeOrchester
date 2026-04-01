@@ -15,6 +15,8 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 700,
     backgroundColor: '#0c0e11',
+    frame: false,
+    titleBarStyle: 'hidden',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -36,6 +38,16 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  mainWindow.on('maximize', () => {
+    mainWindow?.webContents.send('window-maximized', true);
+  });
+  mainWindow.on('unmaximize', () => {
+    mainWindow?.webContents.send('window-maximized', false);
+  });
+  mainWindow.on('restore', () => {
+    mainWindow?.webContents.send('window-maximized', false);
   });
 }
 
@@ -133,4 +145,24 @@ ipcMain.handle('show-notification', async (_event, title: string, body: string) 
 ipcMain.handle('open-external', async (_event, url: string) => {
   await shell.openExternal(url);
   return { success: true };
+});
+
+ipcMain.handle('window-minimize', () => {
+  mainWindow?.minimize();
+});
+
+ipcMain.handle('window-maximize', () => {
+  if (mainWindow?.isMaximized()) {
+    mainWindow?.restore();
+  } else {
+    mainWindow?.maximize();
+  }
+});
+
+ipcMain.handle('window-close', () => {
+  mainWindow?.close();
+});
+
+ipcMain.handle('window-is-maximized', () => {
+  return mainWindow?.isMaximized() ?? false;
 });

@@ -10,6 +10,11 @@ export interface ElectronAPI {
   onPtyData: (callback: (data: { sessionId: string; data: string }) => void) => void;
   onPtyExit: (callback: (data: { sessionId: string; exitCode: number }) => void) => void;
   onTrabajoTerminado: (callback: (data: { sessionId: string; value: boolean }) => void) => void;
+  windowMinimize: () => Promise<void>;
+  windowMaximize: () => Promise<void>;
+  windowClose: () => Promise<void>;
+  windowIsMaximized: () => Promise<boolean>;
+  onWindowMaximized: (callback: (maximized: boolean) => void) => void;
 }
 
 const api: ElectronAPI = {
@@ -30,6 +35,14 @@ const api: ElectronAPI = {
   onTrabajoTerminado: (callback) => {
     ipcRenderer.removeAllListeners('trabajo-terminado');
     ipcRenderer.on('trabajo-terminado', (_event, data) => callback(data));
+  },
+  windowMinimize: () => ipcRenderer.invoke('window-minimize'),
+  windowMaximize: () => ipcRenderer.invoke('window-maximize'),
+  windowClose: () => ipcRenderer.invoke('window-close'),
+  windowIsMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+  onWindowMaximized: (callback) => {
+    ipcRenderer.removeAllListeners('window-maximized');
+    ipcRenderer.on('window-maximized', (_event, maximized) => callback(maximized));
   },
 };
 

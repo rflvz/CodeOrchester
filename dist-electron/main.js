@@ -17,6 +17,8 @@ function createWindow() {
         minWidth: 1024,
         minHeight: 700,
         backgroundColor: '#0c0e11',
+        frame: false,
+        titleBarStyle: 'hidden',
         webPreferences: {
             preload: path_1.default.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -37,6 +39,15 @@ function createWindow() {
     mainWindow.on('closed', () => {
         mainWindow = null;
     });
+    mainWindow.on('maximize', () => {
+        mainWindow?.webContents.send('window-maximized', true);
+    });
+    mainWindow.on('unmaximize', () => {
+        mainWindow?.webContents.send('window-maximized', false);
+    });
+    mainWindow.on('restore', () => {
+        mainWindow?.webContents.send('window-maximized', false);
+    });
 }
 electron_1.app.whenReady().then(() => {
     createWindow();
@@ -53,6 +64,15 @@ electron_1.app.on('window-all-closed', () => {
 });
 // IPC Handlers
 electron_1.ipcMain.handle('start-pty', async (_event, sessionId, cwd) => {
+    // Kill any existing session with the same ID to prevent leaks
+    const existing = ptys.get(sessionId);
+    if (existing) {
+        try {
+            existing.kill();
+        }
+        catch { /* ignore */ }
+        ptys.delete(sessionId);
+    }
     const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
     const pty = (0, node_pty_1.spawn)(shell, [], {
         cwd: cwd || os_1.default.homedir(),
@@ -113,4 +133,21 @@ electron_1.ipcMain.handle('show-notification', async (_event, title, body) => {
 electron_1.ipcMain.handle('open-external', async (_event, url) => {
     await electron_1.shell.openExternal(url);
     return { success: true };
+});
+electron_1.ipcMain.handle('window-minimize', () => {
+    mainWindow?.minimize();
+});
+electron_1.ipcMain.handle('window-maximize', () => {
+    if (mainWindow?.isMaximized()) {
+        mainWindow?.restore();
+    }
+    else {
+        mainWindow?.maximize();
+    }
+});
+electron_1.ipcMain.handle('window-close', () => {
+    mainWindow?.close();
+});
+electron_1.ipcMain.handle('window-is-maximized', () => {
+    return mainWindow?.isMaximized() ?? false;
 });
