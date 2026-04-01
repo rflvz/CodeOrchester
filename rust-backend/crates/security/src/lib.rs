@@ -201,4 +201,101 @@ mod tests {
         assert!(!is_allowed_env_var("SECRET_TOKEN"));
         assert!(!is_allowed_env_var("AWS_SECRET_ACCESS_KEY"));
     }
+
+    // -------------------------------------------------------------------------
+    // Additional targeted tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn valid_uuid_v4_format_accepted() {
+        // Standard UUID v4 (version nibble = 4 is not enforced by the regex,
+        // only the shape 8-4-4-4-12 hex is validated)
+        assert!(validate_session_id("f47ac10b-58cc-4372-a567-0e02b2c3d479").is_ok());
+    }
+
+    #[test]
+    fn uuid_wrong_length_rejected() {
+        // 35 chars (one too short)
+        assert!(validate_session_id("550e8400-e29b-41d4-a716-44665544000").is_err());
+    }
+
+    #[test]
+    fn uuid_with_invalid_chars_rejected() {
+        // contains 'z' which is not a hex digit
+        assert!(validate_session_id("550e8400-e29b-41d4-a716-44665544000z").is_err());
+    }
+
+    #[test]
+    fn payload_exactly_at_limit_is_ok() {
+        let data = vec![b'x'; MAX_PTY_WRITE_BYTES];
+        assert!(validate_pty_payload(&data).is_ok());
+    }
+
+    #[test]
+    fn payload_one_byte_over_limit_is_err() {
+        let data = vec![b'x'; MAX_PTY_WRITE_BYTES + 1];
+        let err = validate_pty_payload(&data).unwrap_err();
+        // Verify the error carries the right metadata
+        assert!(matches!(
+            err,
+            SecurityError::PayloadTooLarge { size, max }
+            if size == MAX_PTY_WRITE_BYTES + 1 && max == MAX_PTY_WRITE_BYTES
+        ));
+    }
+
+    #[test]
+    fn empty_payload_is_ok() {
+        assert!(validate_pty_payload(&[]).is_ok());
+    }
+
+    #[test]
+    fn http_url_allowed() {
+        assert!(validate_external_url("http://example.com").is_ok());
+    }
+
+    #[test]
+    fn mailto_url_allowed() {
+        // "mailto" is in ALLOWED_URL_SCHEMES; the validator uses split("://")
+        // so the URL must have "://" for the scheme to be extracted correctly.
+        // "mailto://user@example.com" is non-standard but passes the scheme check.
+        assert!(validate_external_url("mailto://user@example.com").is_ok());
+    }
+
+    #[test]
+    fn ftp_url_rejected() {
+        assert!(validate_external_url("ftp://files.example.com").is_err());
+    }
+
+    #[test]
+    fn url_without_scheme_separator_rejected() {
+        // No "://" — split gives a single token which is not in ALLOWED list
+        assert!(validate_external_url("example.com").is_err());
+    }
+
+    #[test]
+    fn traversal_with_windows_style_rejected() {
+        // ".." still matches on Windows-style paths
+        assert!(validate_cwd("C:\\Users\\..\\etc").is_err());
+    }
+
+    #[test]
+    fn relative_cwd_without_traversal_accepted() {
+        assert!(validate_cwd("src/main.rs").is_ok());
+    }
+
+    #[test]
+    fn anthropic_api_key_is_allowed() {
+        assert!(is_allowed_env_var("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn term_env_var_is_allowed() {
+        assert!(is_allowed_env_var("TERM"));
+        assert!(is_allowed_env_var("COLORTERM"));
+    }
+
+    #[test]
+    fn empty_env_var_name_rejected() {
+        assert!(!is_allowed_env_var(""));
+    }
 }

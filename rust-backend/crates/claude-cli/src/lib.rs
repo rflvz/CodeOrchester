@@ -167,4 +167,67 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn parse_trabajo_terminado_embedded_in_line() {
+        // sentinel can appear mid-line (e.g. prefixed by a timestamp)
+        assert_eq!(
+            ClaudeCliIntegrator::parse_trabajo_terminado(
+                "[INFO] agent output trabajo_terminado=true done"
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn parse_trabajo_terminado_false_embedded() {
+        assert_eq!(
+            ClaudeCliIntegrator::parse_trabajo_terminado(
+                "prefix trabajo_terminado=false suffix"
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn parse_trabajo_terminado_empty_line() {
+        assert_eq!(ClaudeCliIntegrator::parse_trabajo_terminado(""), None);
+    }
+
+    #[test]
+    fn parse_trabajo_terminado_similar_but_wrong_key() {
+        // "trabajo_terminado" without "=" should not match
+        assert_eq!(
+            ClaudeCliIntegrator::parse_trabajo_terminado("trabajo_terminado true"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_trabajo_terminado_multiline_finds_true_line() {
+        // Simulate checking each line of multi-line PTY output
+        let output = "Agent starting...\nRunning task\ntrabajo_terminado=true\nDone";
+        let result = output
+            .lines()
+            .find_map(ClaudeCliIntegrator::parse_trabajo_terminado);
+        assert_eq!(result, Some(true));
+    }
+
+    #[test]
+    fn parse_trabajo_terminado_multiline_finds_false_line() {
+        let output = "Agent starting...\ntrabajo_terminado=false\nError occurred";
+        let result = output
+            .lines()
+            .find_map(ClaudeCliIntegrator::parse_trabajo_terminado);
+        assert_eq!(result, Some(false));
+    }
+
+    #[test]
+    fn parse_trabajo_terminado_multiline_no_sentinel() {
+        let output = "Agent starting...\nRunning...\nCompleted without sentinel";
+        let result = output
+            .lines()
+            .find_map(ClaudeCliIntegrator::parse_trabajo_terminado);
+        assert_eq!(result, None);
+    }
 }

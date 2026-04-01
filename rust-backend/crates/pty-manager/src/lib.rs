@@ -204,3 +204,98 @@ impl PtyManager {
         Uuid::new_v4().to_string()
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_session_id_is_valid_uuid_v4_shape() {
+        let id = PtyManager::new_session_id();
+        // UUID v4 format: 8-4-4-4-12 hex chars separated by hyphens (36 total)
+        assert_eq!(id.len(), 36);
+        let parts: Vec<&str> = id.split('-').collect();
+        assert_eq!(parts.len(), 5);
+        assert_eq!(parts[0].len(), 8);
+        assert_eq!(parts[1].len(), 4);
+        assert_eq!(parts[2].len(), 4);
+        assert_eq!(parts[3].len(), 4);
+        assert_eq!(parts[4].len(), 12);
+        for part in &parts {
+            assert!(part.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+    }
+
+    #[test]
+    fn new_session_ids_are_unique() {
+        let id1 = PtyManager::new_session_id();
+        let id2 = PtyManager::new_session_id();
+        assert_ne!(id1, id2, "two generated session IDs must be distinct");
+    }
+
+    #[test]
+    fn pty_manager_new_returns_arc() {
+        // Verify we get a valid, non-null Arc back
+        let mgr = PtyManager::new();
+        // We can subscribe without panicking
+        let _rx = mgr.subscribe_output();
+        let _rx2 = mgr.subscribe_trabajo();
+    }
+
+    #[test]
+    fn subscribe_output_returns_receiver() {
+        let mgr = PtyManager::new();
+        let _rx = mgr.subscribe_output();
+        // A second subscriber must also succeed
+        let _rx2 = mgr.subscribe_output();
+    }
+
+    #[test]
+    fn subscribe_trabajo_returns_receiver() {
+        let mgr = PtyManager::new();
+        let _rx = mgr.subscribe_trabajo();
+        let _rx2 = mgr.subscribe_trabajo();
+    }
+
+    #[test]
+    fn pty_size_default_is_80x24() {
+        let size = PtySize::default();
+        assert_eq!(size.cols, 80);
+        assert_eq!(size.rows, 24);
+    }
+
+    #[test]
+    fn spawn_config_default_has_empty_env() {
+        let cfg = SpawnConfig::default();
+        assert!(cfg.env.is_empty());
+        assert!(cfg.cwd.is_none());
+        assert!(cfg.command.is_none());
+    }
+
+    #[tokio::test]
+    async fn write_on_unknown_session_returns_not_found() {
+        let mgr = PtyManager::new();
+        // sessions map is empty, so write must return SessionNotFound before
+        // reaching the todo!() branch.
+        let result = mgr.write("no-such-session", b"data").await;
+        assert!(matches!(result, Err(PtyError::SessionNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn resize_on_unknown_session_returns_not_found() {
+        let mgr = PtyManager::new();
+        let result = mgr.resize("no-such-session", PtySize::default()).await;
+        assert!(matches!(result, Err(PtyError::SessionNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn kill_on_unknown_session_returns_not_found() {
+        let mgr = PtyManager::new();
+        let result = mgr.kill("no-such-session").await;
+        assert!(matches!(result, Err(PtyError::SessionNotFound(_))));
+    }
+}

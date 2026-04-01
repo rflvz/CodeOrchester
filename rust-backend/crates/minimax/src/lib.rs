@@ -189,4 +189,58 @@ mod tests {
         };
         assert!(MiniMaxClient::new(config).is_ok());
     }
+
+    #[test]
+    fn env_var_api_key_accepted() {
+        // Set env var so MiniMaxClient::new finds it even when config.api_key is None.
+        std::env::set_var("MINIMAX_API_KEY", "env-key-value");
+        let config = MiniMaxConfig::default(); // api_key: None
+        let result = MiniMaxClient::new(config);
+        // Clean up immediately before asserting so parallel tests aren't affected.
+        std::env::remove_var("MINIMAX_API_KEY");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn completion_request_default_model() {
+        let req = CompletionRequest::default();
+        assert_eq!(req.model, "abab6.5s-chat");
+        assert!(req.max_tokens.is_some());
+        assert!(req.temperature.is_some());
+    }
+
+    #[test]
+    fn completion_request_serialises_without_none_fields() {
+        let req = CompletionRequest {
+            model: "abab6".to_owned(),
+            prompt: "Hello".to_owned(),
+            max_tokens: None,
+            temperature: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        // skip_serializing_if = "Option::is_none" → these keys must be absent
+        assert!(!json.contains("max_tokens"));
+        assert!(!json.contains("temperature"));
+    }
+
+    #[test]
+    fn minimax_config_default_base_url() {
+        let cfg = MiniMaxConfig::default();
+        assert!(cfg.base_url.starts_with("https://"));
+        assert_eq!(cfg.max_retries, 3);
+        assert!(cfg.max_rps > 0);
+    }
+
+    #[test]
+    fn api_key_resolved_from_config_field() {
+        let config = MiniMaxConfig {
+            api_key: Some("direct-key".to_owned()),
+            ..Default::default()
+        };
+        // Ensure env var is absent to test config-path exclusively
+        std::env::remove_var("MINIMAX_API_KEY");
+        let client = MiniMaxClient::new(config).unwrap();
+        // api_key() is private but we can verify new() succeeded (it validates the key)
+        drop(client);
+    }
 }

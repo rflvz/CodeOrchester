@@ -204,4 +204,138 @@ mod tests {
             IpcMessage::TrabajoTerminado { value: true, .. }
         ));
     }
+
+    #[test]
+    fn roundtrip_write_pty() {
+        let msg = IpcMessage::WritePty {
+            session_id: "s4".to_owned(),
+            data: "echo hello\n".to_owned(),
+        };
+        let json = IpcServer::encode(&msg).unwrap();
+        let back = IpcServer::decode(&json).unwrap();
+        assert!(matches!(back, IpcMessage::WritePty { .. }));
+    }
+
+    #[test]
+    fn roundtrip_resize_pty() {
+        let msg = IpcMessage::ResizePty {
+            session_id: "s5".to_owned(),
+            cols: 120,
+            rows: 40,
+        };
+        let json = IpcServer::encode(&msg).unwrap();
+        let back = IpcServer::decode(&json).unwrap();
+        assert!(matches!(back, IpcMessage::ResizePty { cols: 120, rows: 40, .. }));
+    }
+
+    #[test]
+    fn roundtrip_kill_pty() {
+        let msg = IpcMessage::KillPty {
+            session_id: "s6".to_owned(),
+        };
+        let json = IpcServer::encode(&msg).unwrap();
+        let back = IpcServer::decode(&json).unwrap();
+        assert!(matches!(back, IpcMessage::KillPty { .. }));
+    }
+
+    #[test]
+    fn roundtrip_show_notification() {
+        let msg = IpcMessage::ShowNotification {
+            title: "Alert".to_owned(),
+            body: "Agent finished".to_owned(),
+        };
+        let json = IpcServer::encode(&msg).unwrap();
+        let back = IpcServer::decode(&json).unwrap();
+        assert!(matches!(back, IpcMessage::ShowNotification { .. }));
+    }
+
+    #[test]
+    fn roundtrip_open_external() {
+        let msg = IpcMessage::OpenExternal {
+            url: "https://example.com".to_owned(),
+        };
+        let json = IpcServer::encode(&msg).unwrap();
+        let back = IpcServer::decode(&json).unwrap();
+        assert!(matches!(back, IpcMessage::OpenExternal { .. }));
+    }
+
+    #[test]
+    fn roundtrip_pty_exit() {
+        let msg = IpcMessage::PtyExit {
+            session_id: "s7".to_owned(),
+            exit_code: 0,
+        };
+        let json = IpcServer::encode(&msg).unwrap();
+        let back = IpcServer::decode(&json).unwrap();
+        assert!(matches!(back, IpcMessage::PtyExit { exit_code: 0, .. }));
+    }
+
+    #[test]
+    fn roundtrip_ack_success() {
+        let msg = IpcMessage::Ack {
+            request_id: "req-1".to_owned(),
+            success: true,
+            error: None,
+            pid: Some(9999),
+        };
+        let json = IpcServer::encode(&msg).unwrap();
+        let back = IpcServer::decode(&json).unwrap();
+        assert!(matches!(back, IpcMessage::Ack { success: true, .. }));
+    }
+
+    #[test]
+    fn roundtrip_ack_failure() {
+        let msg = IpcMessage::Ack {
+            request_id: "req-2".to_owned(),
+            success: false,
+            error: Some("spawn failed".to_owned()),
+            pid: None,
+        };
+        let json = IpcServer::encode(&msg).unwrap();
+        let back = IpcServer::decode(&json).unwrap();
+        match back {
+            IpcMessage::Ack { success, error, pid, .. } => {
+                assert!(!success);
+                assert_eq!(error.as_deref(), Some("spawn failed"));
+                assert!(pid.is_none());
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_json_returns_error() {
+        let result = IpcServer::decode("{not valid json}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn unknown_type_returns_error() {
+        let result = IpcServer::decode(r#"{"type":"unknown-variant","data":{}}"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn encode_produces_type_tag() {
+        let msg = IpcMessage::KillPty {
+            session_id: "s-tag".to_owned(),
+        };
+        let json = IpcServer::encode(&msg).unwrap();
+        assert!(json.contains("\"type\""));
+        assert!(json.contains("kill-pty"));
+    }
+
+    #[test]
+    fn start_pty_with_no_cwd_roundtrips() {
+        let msg = IpcMessage::StartPty {
+            session_id: "s-nocwd".to_owned(),
+            cwd: None,
+        };
+        let json = IpcServer::encode(&msg).unwrap();
+        let back = IpcServer::decode(&json).unwrap();
+        match back {
+            IpcMessage::StartPty { cwd, .. } => assert!(cwd.is_none()),
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
 }
