@@ -7,10 +7,12 @@ interface UIStore {
   sidebarCollapsed: boolean;
   rightPanelOpen: boolean;
   rightPanelContent: 'terminal' | 'details' | 'none';
+  notificationsPanelOpen: boolean;
 
   setScreen: (screen: Screen) => void;
   toggleSidebar: () => void;
   setRightPanel: (open: boolean, content?: 'terminal' | 'details') => void;
+  toggleNotificationsPanel: () => void;
 }
 
 export const useUIStore = create<UIStore>((set) => ({
@@ -18,6 +20,7 @@ export const useUIStore = create<UIStore>((set) => ({
   sidebarCollapsed: false,
   rightPanelOpen: false,
   rightPanelContent: 'none',
+  notificationsPanelOpen: false,
 
   setScreen: (screen) => {
     set({ currentScreen: screen });
@@ -29,5 +32,9 @@ export const useUIStore = create<UIStore>((set) => ({
 
   setRightPanel: (open, content = 'details') => {
     set({ rightPanelOpen: open, rightPanelContent: content });
+  },
+
+  toggleNotificationsPanel: () => {
+    set((state) => ({ notificationsPanelOpen: !state.notificationsPanelOpen }));
   },
 }));

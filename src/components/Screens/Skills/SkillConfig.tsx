@@ -15,6 +15,7 @@ export function SkillConfig({ skillId, onBack }: SkillConfigProps) {
   const [newParamName, setNewParamName] = useState('');
   const [newParamType, setNewParamType] = useState<'string' | 'number' | 'boolean' | 'array'>('string');
   const [newParamRequired, setNewParamRequired] = useState(false);
+  const [paramNameError, setParamNameError] = useState('');
 
   const skillsList = Object.values(skills);
   const selectedSkill = selectedSkillId ? skills[selectedSkillId] : null;
@@ -26,7 +27,11 @@ export function SkillConfig({ skillId, onBack }: SkillConfigProps) {
   };
 
   const handleAddParameter = () => {
-    if (!newParamName.trim()) return;
+    if (!newParamName.trim()) {
+      setParamNameError('El nombre del parámetro es requerido');
+      return;
+    }
+    setParamNameError('');
 
     const newParam: SkillParameter = {
       name: newParamName.trim(),
@@ -210,13 +215,18 @@ export function SkillConfig({ skillId, onBack }: SkillConfigProps) {
                     Nuevo Parámetro
                   </h3>
                   <div className="flex items-center gap-3">
-                    <input
-                      type="text"
-                      value={newParamName}
-                      onChange={(e) => setNewParamName(e.target.value)}
-                      placeholder="Nombre del parámetro"
-                      className="flex-1 px-3 py-2 bg-surface-container-low rounded text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    />
+                    <div className="flex-1 flex flex-col gap-1">
+                      <input
+                        type="text"
+                        value={newParamName}
+                        onChange={(e) => { setNewParamName(e.target.value); setParamNameError(''); }}
+                        placeholder="Nombre del parámetro"
+                        className={`w-full px-3 py-2 bg-surface-container-low rounded text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 ${paramNameError ? 'ring-1 ring-error/60 focus:ring-error/60' : 'focus:ring-primary/50'}`}
+                      />
+                      {paramNameError && (
+                        <p className="text-error text-xs font-mono">{paramNameError}</p>
+                      )}
+                    </div>
                     <select
                       value={newParamType}
                       onChange={(e) => setNewParamType(e.target.value as any)}
@@ -238,8 +248,7 @@ export function SkillConfig({ skillId, onBack }: SkillConfigProps) {
                     </label>
                     <button
                       onClick={handleAddParameter}
-                      disabled={!newParamName.trim()}
-                      className="btn-primary flex items-center gap-2 text-sm disabled:opacity-50"
+                      className="btn-primary flex items-center gap-2 text-sm"
                     >
                       <Plus className="w-4 h-4" />
                       AGREGAR

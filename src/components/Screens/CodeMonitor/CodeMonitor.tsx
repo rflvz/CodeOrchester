@@ -34,20 +34,6 @@ interface TerminalTab {
   sessionId: string;
 }
 
-declare global {
-  interface Window {
-    electron?: {
-      startPty: (sessionId: string, cwd?: string) => Promise<{ success: boolean; pid?: number; error?: string }>;
-      writePty: (sessionId: string, data: string) => Promise<{ success: boolean; error?: string }>;
-      resizePty: (sessionId: string, cols: number, rows: number) => Promise<{ success: boolean; error?: string }>;
-      killPty: (sessionId: string) => Promise<{ success: boolean; error?: string }>;
-      showNotification: (title: string, body: string) => Promise<{ success: boolean; error?: string }>;
-      onPtyData: (callback: (data: { sessionId: string; data: string }) => void) => void;
-      onPtyExit: (callback: (data: { sessionId: string; exitCode: number }) => void) => void;
-      onTrabajoTerminado: (callback: (data: { sessionId: string; value: boolean }) => void) => void;
-    };
-  }
-}
 
 const fileIcons: Record<string, React.ReactNode> = {
   ts: <FileText className="w-4 h-4 text-blue-400" />,
@@ -107,7 +93,6 @@ export function CodeMonitor() {
   const tabsRef = useRef<TerminalTab[]>([]);
   const terminalsMapRef = useRef<Map<string, Terminal>>(new Map());
   const activeTabRef = useRef<string | null>(null);
-  const ptyListenersRegistered = useRef(false);
 
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
   useEffect(() => { terminalsMapRef.current = terminals; }, [terminals]);
@@ -130,24 +115,30 @@ export function CodeMonitor() {
   const { agents } = useAgentStore();
   const agentsList = Object.values(agents);
 
-  // Register PTY listeners once globally — guard prevents double-registration in React StrictMode
+  // Register PTY listeners — cleanup on unmount prevents listener leaks when navigating away
   useEffect(() => {
-    if (!window.electron || ptyListenersRegistered.current) return;
-    ptyListenersRegistered.current = true;
-    window.electron.onPtyData(({ sessionId, data }) => {
+    if (!window.electron) return;
+
+    const removePtyData = window.electron.onPtyData(({ sessionId, data }) => {
       const tab = tabsRef.current.find((t) => t.sessionId === sessionId);
       if (tab) terminalsMapRef.current.get(tab.id)?.write(data);
     });
-    window.electron.onPtyExit(({ sessionId, exitCode }) => {
+    const removePtyExit = window.electron.onPtyExit(({ sessionId, exitCode }) => {
       const tab = tabsRef.current.find((t) => t.sessionId === sessionId);
       if (tab) terminalsMapRef.current.get(tab.id)?.writeln(`\r\n\x1b[33m[Process exited: ${exitCode}]\x1b[0m`);
     });
-    window.electron.onTrabajoTerminado(({ sessionId, value }) => {
+    const removeTrabajoTerminado = window.electron.onTrabajoTerminado(({ sessionId, value }) => {
       const tab = tabsRef.current.find((t) => t.sessionId === sessionId);
       if (tab) terminalsMapRef.current.get(tab.id)?.writeln(
         value ? '\r\n\x1b[32m[trabajo_terminado=true]\x1b[0m' : '\r\n\x1b[31m[trabajo_terminado=false]\x1b[0m'
       );
     });
+
+    return () => {
+      removePtyData();
+      removePtyExit();
+      removeTrabajoTerminado();
+    };
   }, []);
 
   // Mount terminal into the active tab's DOM container on first activation
@@ -166,7 +157,11 @@ export function CodeMonitor() {
     mountedTerminalsRef.current.add(activeTab);
 
     if (window.electron) {
-      window.electron.startPty(tab.sessionId);
+      window.electron.startPty(tab.sessionId).then((result) => {
+        if (!result.success) {
+          terminal.writeln(`\x1b[31m[ERROR]\x1b[0m PTY start failed: ${result.error ?? 'Unknown error'}`);
+        }
+      });
       terminal.onData((data) => window.electron?.writePty(tab.sessionId, data));
     } else {
       terminal.writeln('\x1b[36m╔════════════════════════════════════════╗\x1b[0m');

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Search, Wrench, Eye, Code, Bug, FileText, Rocket, Brain, Sparkles } from 'lucide-react';
+import { Plus, Search, Wrench, Eye, Code, Bug, FileText, Rocket, Brain, Sparkles, Trash2, Edit2 } from 'lucide-react';
 import { useSkillStore } from '../../../stores/skillStore';
 import { SkillBadge } from '../../Shared/SkillBadge';
 import { GlassModal } from '../../Shared/GlassModal';
@@ -28,7 +28,7 @@ const categoryColors: Record<SkillCategory, string> = {
 };
 
 export function SkillsLibrary() {
-  const { skills, categories, createSkill } = useSkillStore();
+  const { skills, categories, createSkill, deleteSkill } = useSkillStore();
   const [selectedCategory, setSelectedCategory] = useState<SkillCategory | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewSkillModal, setShowNewSkillModal] = useState(false);
@@ -169,6 +169,29 @@ export function SkillsLibrary() {
                 {selectedSkill.prompt}
               </pre>
             </div>
+            {/* Delete / Edit actions */}
+            <div className="flex justify-end gap-2 pt-2 border-t border-outline-variant/15">
+              <button
+                onClick={() => {
+                  setShowNewSkillModal(true);
+                  setSelectedSkill(null);
+                }}
+                className="flex items-center gap-2 px-4 py-2 text-sm text-on-surface-variant hover:text-on-surface border border-outline-variant/30 rounded transition-colors"
+              >
+                <Edit2 className="w-3 h-3" />
+                Editar
+              </button>
+              <button
+                onClick={() => {
+                  deleteSkill(selectedSkill.id);
+                  setSelectedSkill(null);
+                }}
+                className="flex items-center gap-2 px-4 py-2 text-sm text-on-error bg-error rounded hover:bg-error/90 transition-colors"
+              >
+                <Trash2 className="w-3 h-3" />
+                Eliminar
+              </button>
+            </div>
           </div>
         </GlassModal>
       )}
@@ -193,12 +216,17 @@ interface NewSkillModalProps {
 
 function NewSkillModal({ isOpen, onClose, categories, onCreate }: NewSkillModalProps) {
   const [name, setName] = useState('');
+  const [nameError, setNameError] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<SkillCategory>('custom');
   const [prompt, setPrompt] = useState('');
 
   const handleCreate = () => {
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      setNameError('El nombre de la skill es requerido');
+      return;
+    }
+    setNameError('');
     onCreate({ name, description, category, prompt });
     setName('');
     setDescription('');
@@ -215,9 +243,10 @@ function NewSkillModal({ isOpen, onClose, categories, onCreate }: NewSkillModalP
           <input
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 bg-surface-container-low rounded-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/50"
+            onChange={(e) => { setName(e.target.value); setNameError(''); }}
+            className={`w-full px-3 py-2 bg-surface-container-low rounded-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 ${nameError ? 'ring-1 ring-error/60 focus:ring-error/60' : 'focus:ring-primary/50'}`}
           />
+          {nameError && <p className="text-error text-xs mt-1 font-mono">{nameError}</p>}
         </div>
         <div>
           <label className="block text-sm font-medium text-on-surface mb-1">Descripción</label>

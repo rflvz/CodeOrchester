@@ -10,7 +10,8 @@ export function TitleBar() {
     const electron = (window as any).electron;
 
     electron.windowIsMaximized().then(setIsMaximized);
-    electron.onWindowMaximized(setIsMaximized);
+    const removeWindowMaximized = electron.onWindowMaximized(setIsMaximized);
+    return () => removeWindowMaximized();
   }, []);
 
   const handleMinimize = () => {

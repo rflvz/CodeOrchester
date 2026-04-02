@@ -2,31 +2,50 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 const api = {
-    startPty: (sessionId, cwd) => electron_1.ipcRenderer.invoke('start-pty', sessionId, cwd),
-    writePty: (sessionId, data) => electron_1.ipcRenderer.invoke('write-pty', sessionId, data),
+    startPty: (sessionId, cwd, initialPrompt) => electron_1.ipcRenderer.invoke('start-pty', sessionId, cwd, initialPrompt),
+    writePty: (sessionId, data, initialPrompt) => electron_1.ipcRenderer.invoke('write-pty', sessionId, data, initialPrompt),
     resizePty: (sessionId, cols, rows) => electron_1.ipcRenderer.invoke('resize-pty', sessionId, cols, rows),
     killPty: (sessionId) => electron_1.ipcRenderer.invoke('kill-pty', sessionId),
     showNotification: (title, body) => electron_1.ipcRenderer.invoke('show-notification', title, body),
     openExternal: (url) => electron_1.ipcRenderer.invoke('open-external', url),
     onPtyData: (callback) => {
-        electron_1.ipcRenderer.removeAllListeners('pty-data');
-        electron_1.ipcRenderer.on('pty-data', (_event, data) => callback(data));
+        const listener = (_, data) => callback(data);
+        electron_1.ipcRenderer.on('pty-data', listener);
+        return () => electron_1.ipcRenderer.removeListener('pty-data', listener);
     },
     onPtyExit: (callback) => {
-        electron_1.ipcRenderer.removeAllListeners('pty-exit');
-        electron_1.ipcRenderer.on('pty-exit', (_event, data) => callback(data));
+        const listener = (_, data) => callback(data);
+        electron_1.ipcRenderer.on('pty-exit', listener);
+        return () => electron_1.ipcRenderer.removeListener('pty-exit', listener);
     },
     onTrabajoTerminado: (callback) => {
-        electron_1.ipcRenderer.removeAllListeners('trabajo-terminado');
-        electron_1.ipcRenderer.on('trabajo-terminado', (_event, data) => callback(data));
+        const listener = (_, data) => callback(data);
+        electron_1.ipcRenderer.on('trabajo-terminado', listener);
+        return () => electron_1.ipcRenderer.removeListener('trabajo-terminado', listener);
+    },
+    onClaudeAwaitingInput: (callback) => {
+        const listener = (_, data) => callback(data);
+        electron_1.ipcRenderer.on('claude-awaiting-input', listener);
+        return () => electron_1.ipcRenderer.removeListener('claude-awaiting-input', listener);
     },
     windowMinimize: () => electron_1.ipcRenderer.invoke('window-minimize'),
     windowMaximize: () => electron_1.ipcRenderer.invoke('window-maximize'),
     windowClose: () => electron_1.ipcRenderer.invoke('window-close'),
     windowIsMaximized: () => electron_1.ipcRenderer.invoke('window-is-maximized'),
     onWindowMaximized: (callback) => {
-        electron_1.ipcRenderer.removeAllListeners('window-maximized');
-        electron_1.ipcRenderer.on('window-maximized', (_event, maximized) => callback(maximized));
+        const listener = (_, maximized) => callback(maximized);
+        electron_1.ipcRenderer.on('window-maximized', listener);
+        return () => electron_1.ipcRenderer.removeListener('window-maximized', listener);
     },
+    onClaudeStream: (callback) => {
+        const listener = (_, data) => callback(data);
+        electron_1.ipcRenderer.on('claude-stream', listener);
+        return () => electron_1.ipcRenderer.removeListener('claude-stream', listener);
+    },
+    getSettings: () => electron_1.ipcRenderer.invoke('get-settings'),
+    setSettings: (updates) => electron_1.ipcRenderer.invoke('set-settings', updates),
+    getAgentState: () => electron_1.ipcRenderer.invoke('get-agent-state'),
+    setAgentState: (agents) => electron_1.ipcRenderer.invoke('set-agent-state', agents),
+    getSystemMetrics: () => electron_1.ipcRenderer.invoke('get-system-metrics'),
 };
 electron_1.contextBridge.exposeInMainWorld('electron', api);

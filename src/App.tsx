@@ -17,15 +17,27 @@ function App() {
     const el = window.electron;
     if (!el) return;
 
-    el.onPtyData(({ sessionId, data }) => {
+    const removePtyData = el.onPtyData(({ sessionId, data }) => {
       pushLogs(sessionId, data);
     });
 
-    el.onTrabajoTerminado(({ sessionId, value }) => {
+    const removeTrabajoTerminado = el.onTrabajoTerminado(({ sessionId, value }) => {
       const { agentSessionMap } = useTerminalStore.getState();
       const agentId = agentSessionMap[sessionId] ?? sessionId;
       setTrabajoTerminado(agentId, value);
     });
+
+    // Register claude-stream channel (raw JSON events from claude -p --output-format stream-json)
+    const removeClaudeStream = el.onClaudeStream(() => {
+      // Raw JSON events are parsed in main.ts; clean text sent via pty-data.
+      // This listener exists to prevent orphaned listeners on the channel.
+    });
+
+    return () => {
+      removePtyData();
+      removeTrabajoTerminado();
+      removeClaudeStream();
+    };
   }, [pushLogs, setTrabajoTerminado]);
 
   return (

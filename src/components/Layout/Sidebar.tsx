@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useUIStore, Screen } from '../../stores/uiStore';
 import { useNotificationStore } from '../../stores/notificationStore';
+import { NotificationsPanel } from '../Shared/NotificationsPanel';
 
 const navItems: { id: Screen; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
@@ -29,10 +30,12 @@ const navItems: { id: Screen; label: string; icon: React.ReactNode }[] = [
 ];
 
 export function Sidebar() {
-  const { currentScreen, setScreen, sidebarCollapsed, toggleSidebar } = useUIStore();
+  const { currentScreen, setScreen, sidebarCollapsed, toggleSidebar, toggleNotificationsPanel } = useUIStore();
   const { unreadCount } = useNotificationStore();
 
   return (
+    <>
+    <NotificationsPanel />
     <aside
       className={`bg-surface-container-low h-full flex flex-col transition-all duration-300 ${
         sidebarCollapsed ? 'w-16' : 'w-60'
@@ -80,17 +83,13 @@ export function Sidebar() {
       {/* Footer */}
       <div className="p-2 border-t border-outline-variant/15 space-y-1">
         <button
-          onClick={() => setScreen('settings')}
-          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors ${
-            currentScreen === 'settings'
-              ? 'bg-primary-container/20 text-primary'
-              : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
-          }`}
+          onClick={toggleNotificationsPanel}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface relative"
         >
           <Bell className="w-5 h-5" />
           {!sidebarCollapsed && <span className="font-medium text-sm">Notificaciones</span>}
-          {unreadCount > 0 && !sidebarCollapsed && (
-            <span className="ml-auto bg-error text-on-error text-xs font-bold px-1.5 py-0.5 rounded-full">
+          {unreadCount > 0 && (
+            <span className={`bg-error text-on-error text-xs font-bold px-1.5 py-0.5 rounded-full ${sidebarCollapsed ? 'absolute top-1 right-1' : 'ml-auto'}`}>
               {unreadCount}
             </span>
           )}
@@ -108,5 +107,6 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
+    </>
   );
 }

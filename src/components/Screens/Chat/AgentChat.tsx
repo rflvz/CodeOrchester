@@ -57,13 +57,6 @@ export function AgentChat() {
     });
   }, []);
 
-  // Escuchar claude-awaiting-input — ya no bloquea input pero mantiene canal registrado
-  useEffect(() => {
-    const el = window.electron;
-    if (!el) return;
-    el.onClaudeAwaitingInput(() => {});
-  }, []);
-
   // Ref para trackear cuántos logs del session activo ya se mostraron
   const processedCountRef = useRef(0);
 
@@ -214,8 +207,13 @@ export function AgentChat() {
       return;
     }
 
+    const skillsContext = activeAgent.skills.length > 0
+      ? `Your skills: ${activeAgent.skills.join(', ')}`
+      : 'You have no specific skills configured.';
+    const initialPrompt = `You are ${activeAgent.name}. ${activeAgent.instructions || ''}\n\n${skillsContext}`;
+
     try {
-      await window.electron?.writePty(sessionId, textToSend + '\n');
+      await window.electron?.writePty(sessionId, textToSend + '\n', initialPrompt);
     } catch (err) {
       console.error('[AgentChat] writePty failed:', err);
     }

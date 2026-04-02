@@ -1,7 +1,12 @@
-import { useState } from 'react';
-import { Settings as SettingsIcon, Bell, Palette, Info, Key, Shield, Terminal } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Settings as SettingsIcon, Bell, Palette, Info, Key, Shield, Terminal, Save } from 'lucide-react';
+
 export function Settings() {
   const [activeSection, setActiveSection] = useState('minimax');
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const [darkMode, setDarkMode] = useState(true);
   const [desktopNotifications, setDesktopNotifications] = useState(true);
   const [notificationSound, setNotificationSound] = useState(true);
@@ -13,6 +18,64 @@ export function Settings() {
   const [accentColor, setAccentColor] = useState<'indigo' | 'violet' | 'cyan' | 'emerald'>('indigo');
   const [density, setDensity] = useState<'compact' | 'normal' | 'relaxed'>('normal');
   const [animationsEnabled, setAnimationsEnabled] = useState(true);
+
+  useEffect(() => {
+    const electron = (window as Window & { electron?: { getSettings: () => Promise<Record<string, unknown>> } }).electron;
+    if (!electron) return;
+    electron.getSettings().then((s) => {
+      if (typeof s.darkMode === 'boolean') setDarkMode(s.darkMode);
+      if (typeof s.desktopNotifications === 'boolean') setDesktopNotifications(s.desktopNotifications);
+      if (typeof s.notificationSound === 'boolean') setNotificationSound(s.notificationSound);
+      if (typeof s.minimaxApiKey === 'string') setMinimaxApiKey(s.minimaxApiKey);
+      if (typeof s.minimaxAppId === 'string') setMinimaxAppId(s.minimaxAppId);
+      if (typeof s.claudeCliPath === 'string') setClaudeCliPath(s.claudeCliPath);
+      if (typeof s.claudeWorkDir === 'string') setClaudeWorkDir(s.claudeWorkDir);
+      if (s.fontSize === 'sm' || s.fontSize === 'md' || s.fontSize === 'lg') setFontSize(s.fontSize);
+      if (s.accentColor === 'indigo' || s.accentColor === 'violet' || s.accentColor === 'cyan' || s.accentColor === 'emerald') setAccentColor(s.accentColor);
+      if (s.density === 'compact' || s.density === 'normal' || s.density === 'relaxed') setDensity(s.density);
+      if (typeof s.animationsEnabled === 'boolean') setAnimationsEnabled(s.animationsEnabled);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markDirty = useCallback((setter: (v: any) => void) => (v: any) => {
+    setter(v);
+    setIsDirty(true);
+    setSaveError(null);
+  }, []);
+
+  const handleSave = async () => {
+    const electron = (window as Window & { electron?: { setSettings: (s: Record<string, unknown>) => Promise<{ success: boolean }> } }).electron;
+    if (!electron) return;
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      const result = await electron.setSettings({
+        darkMode, desktopNotifications, notificationSound,
+        minimaxApiKey, minimaxAppId, claudeCliPath, claudeWorkDir,
+        fontSize, accentColor, density, animationsEnabled,
+      });
+      if (result.success) {
+        setIsDirty(false);
+      } else {
+        setSaveError('Error al guardar la configuración');
+      }
+    } catch {
+      setSaveError('Error al guardar la configuración');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const sections = [
     { id: 'minimax', label: 'API MiniMax', icon: <Key className="w-4 h-4" /> },
@@ -26,9 +89,9 @@ export function Settings() {
   return (
     <div className="h-full flex">
       {/* Sidebar */}
-      <div className="w-64 bg-surface-container-low border-r border-outline-variant/15 p-4">
+      <div className="w-64 bg-surface-container-low border-r border-outline-variant/15 p-4 flex flex-col">
         <h2 className="font-headline font-semibold text-on-surface mb-4">Configuración</h2>
-        <div className="space-y-1">
+        <div className="space-y-1 flex-1">
           {sections.map((section) => (
             <button
               key={section.id}
@@ -44,6 +107,25 @@ export function Settings() {
             </button>
           ))}
         </div>
+
+        {/* Save button */}
+        {activeSection !== 'about' && (
+          <div className="pt-4 border-t border-outline-variant/15">
+            {saveError && <p className="text-red-400 text-xs mb-2">{saveError}</p>}
+            <button
+              onClick={handleSave}
+              disabled={!isDirty || isSaving}
+              className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                isDirty && !isSaving
+                  ? 'bg-primary text-on-primary hover:bg-primary/90'
+                  : 'bg-surface-container text-on-surface-variant cursor-not-allowed opacity-50'
+              }`}
+            >
+              <Save className="w-4 h-4" />
+              {isSaving ? 'Guardando...' : isDirty ? 'Guardar cambios' : 'Sin cambios'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Content */}
@@ -61,7 +143,7 @@ export function Settings() {
                 </div>
                 <div>
                   <h3 className="font-headline font-semibold text-on-surface">Configuración API MiniMax</h3>
-                  <p className="text-on-surface-variant text-sm">Gestiona tu API key para integración con MiniMax</p>
+                  <p className="text-on-surface-variant text-sm">Credenciales inyectadas como variables de entorno en sesiones Claude CLI</p>
                 </div>
               </div>
               <div className="space-y-4">
@@ -70,12 +152,12 @@ export function Settings() {
                   <input
                     type="password"
                     value={minimaxApiKey}
-                    onChange={(e) => setMinimaxApiKey(e.target.value)}
+                    onChange={(e) => markDirty(setMinimaxApiKey)(e.target.value)}
                     placeholder="Ingresa tu API key de MiniMax"
                     className="w-full px-4 py-2 bg-surface-container-low rounded-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono"
                   />
                   <p className="text-on-surface-variant text-xs mt-2">
-                    Tu API key se almacena de forma segura en el sistema
+                    Almacenada en electron-store e inyectada como <code className="font-mono">MINIMAX_API_KEY</code> en cada sesión Claude CLI
                   </p>
                 </div>
                 <div>
@@ -83,7 +165,7 @@ export function Settings() {
                   <input
                     type="text"
                     value={minimaxAppId}
-                    onChange={(e) => setMinimaxAppId(e.target.value)}
+                    onChange={(e) => markDirty(setMinimaxAppId)(e.target.value)}
                     placeholder="1234567890"
                     className="w-full px-4 py-2 bg-surface-container-low rounded-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono"
                   />
@@ -91,9 +173,9 @@ export function Settings() {
                 <div className="flex items-center justify-between p-4 bg-surface-container-low rounded">
                   <div className="flex items-center gap-3">
                     <Shield className="w-4 h-4 text-secondary" />
-                    <span className="text-sm text-on-surface">API Validada</span>
+                    <span className="text-sm text-on-surface">Comunicación vía Claude CLI</span>
                   </div>
-                  <span className="px-2 py-1 bg-secondary/20 text-secondary text-xs rounded">Conectado</span>
+                  <span className="px-2 py-1 bg-secondary/20 text-secondary text-xs rounded">Indirecto</span>
                 </div>
               </div>
             </div>
@@ -118,7 +200,7 @@ export function Settings() {
                   <input
                     type="text"
                     value={claudeCliPath}
-                    onChange={(e) => setClaudeCliPath(e.target.value)}
+                    onChange={(e) => markDirty(setClaudeCliPath)(e.target.value)}
                     placeholder="claude"
                     className="w-full px-4 py-2 bg-surface-container-low rounded-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono"
                   />
@@ -131,7 +213,7 @@ export function Settings() {
                   <input
                     type="text"
                     value={claudeWorkDir}
-                    onChange={(e) => setClaudeWorkDir(e.target.value)}
+                    onChange={(e) => markDirty(setClaudeWorkDir)(e.target.value)}
                     placeholder="C:\Users\..."
                     className="w-full px-4 py-2 bg-surface-container-low rounded-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono"
                   />
@@ -158,7 +240,7 @@ export function Settings() {
                     <input
                       type="checkbox"
                       checked={darkMode}
-                      onChange={(e) => setDarkMode(e.target.checked)}
+                      onChange={(e) => markDirty(setDarkMode)(e.target.checked)}
                       className="sr-only peer"
                     />
                     <div className="w-11 h-6 bg-surface-container-high rounded-full peer peer-checked:bg-primary peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface after:rounded-full after:h-5 after:w-5 after:transition-all" />
@@ -180,7 +262,7 @@ export function Settings() {
                 <input
                   type="checkbox"
                   checked={desktopNotifications}
-                  onChange={(e) => setDesktopNotifications(e.target.checked)}
+                  onChange={(e) => markDirty(setDesktopNotifications)(e.target.checked)}
                   className="sr-only peer"
                 />
                 <div className="w-11 h-6 bg-surface-container-high rounded-full peer peer-checked:bg-primary peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface after:rounded-full after:h-5 after:w-5 after:transition-all" />
@@ -196,7 +278,7 @@ export function Settings() {
                 <input
                   type="checkbox"
                   checked={notificationSound}
-                  onChange={(e) => setNotificationSound(e.target.checked)}
+                  onChange={(e) => markDirty(setNotificationSound)(e.target.checked)}
                   className="sr-only peer"
                 />
                 <div className="w-11 h-6 bg-surface-container-high rounded-full peer peer-checked:bg-primary peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface after:rounded-full after:h-5 after:w-5 after:transition-all" />
@@ -256,7 +338,7 @@ export function Settings() {
                 {(['sm', 'md', 'lg'] as const).map((size) => (
                   <button
                     key={size}
-                    onClick={() => setFontSize(size)}
+                    onClick={() => markDirty(setFontSize)(size)}
                     className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors border ${
                       fontSize === size
                         ? 'bg-primary-container/20 text-primary border-primary/30'
@@ -280,7 +362,7 @@ export function Settings() {
                 ]).map((color) => (
                   <button
                     key={color.id}
-                    onClick={() => setAccentColor(color.id)}
+                    onClick={() => markDirty(setAccentColor)(color.id)}
                     className="flex flex-col items-center gap-2"
                     title={color.label}
                   >
@@ -299,7 +381,7 @@ export function Settings() {
                 {(['compact', 'normal', 'relaxed'] as const).map((d) => (
                   <button
                     key={d}
-                    onClick={() => setDensity(d)}
+                    onClick={() => markDirty(setDensity)(d)}
                     className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors border ${
                       density === d
                         ? 'bg-primary-container/20 text-primary border-primary/30'
@@ -321,20 +403,12 @@ export function Settings() {
                 <input
                   type="checkbox"
                   checked={animationsEnabled}
-                  onChange={(e) => setAnimationsEnabled(e.target.checked)}
+                  onChange={(e) => markDirty(setAnimationsEnabled)(e.target.checked)}
                   className="sr-only peer"
                 />
                 <div className="w-11 h-6 bg-surface-container-high rounded-full peer peer-checked:bg-primary peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface after:rounded-full after:h-5 after:w-5 after:transition-all" />
               </label>
             </div>
-          </div>
-        )}
-
-        {activeSection !== 'general' && activeSection !== 'notifications' && activeSection !== 'about' && activeSection !== 'minimax' && activeSection !== 'claude' && activeSection !== 'appearance' && (
-          <div className="surface-card p-8 text-center">
-            <p className="text-on-surface-variant">
-              Sección "{sections.find((s) => s.id === activeSection)?.label}" en desarrollo
-            </p>
           </div>
         )}
       </div>
