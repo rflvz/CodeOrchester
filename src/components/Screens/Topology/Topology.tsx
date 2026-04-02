@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { GitBranch, Users, Network, Plus, Settings, Activity, Zap, Trash2, X, ZoomIn, ZoomOut, Maximize2, Link2, Unlink, LayoutGrid, ArrowRight } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agentStore';
 import { useTeamStore } from '../../../stores/teamStore';
+import { useTerminalStore } from '../../../stores/terminalStore';
 import { Agent, Team } from '../../../types';
 import { AgentAvatar } from '../../Shared/AgentAvatar';
 import { StatusChip } from '../../Shared/StatusChip';
@@ -68,6 +69,12 @@ export function Topology() {
   const [newClusterTopology, setNewClusterTopology] = useState<'hierarchical' | 'mesh' | 'star' | 'chain'>('mesh');
   const [showConnectionsPanel, setShowConnectionsPanel] = useState(false);
 
+  // BUG: localConnections is only stored in local React state — addConnection (imported above) is never called.
+  //      Connections drawn by the user are displayed but never persisted to teamStore, so they vanish on re-render/navigation.
+  // NOTE: teamStore now has persist middleware (connections survive restarts). However, localConnections
+  // in this component is still separate from teamStore.connections. A follow-up should sync them or
+  // migrate to using teamStore.connections directly in the UI.
+  // delegateToConnectedAgents (above) implements TODO #7 — use it when an agent finishes a task.
   // Free-form connections between any agents (no cluster required)
   const [localConnections, setLocalConnections] = useState<{ id: string; fromId: string; toId: string }[]>([]);
   // Connection currently being drawn by dragging
@@ -98,6 +105,21 @@ export function Topology() {
   const containerRef = useRef<HTMLDivElement>(null);
   const didDragRef = useRef(false);
   const dragStartPosRef = useRef({ x: 0, y: 0 });
+
+  // Delegar tarea a agentes conectados en la topology
+  // Se llama cuando un agente recibe trabajo_terminado=true o cuando se activa routing explícito
+  const delegateToConnectedAgents = useCallback(async (sourceAgentId: string, task: string, teamId: string) => {
+    const team = teams[teamId];
+    if (!team) return;
+
+    const outgoing = team.connections.filter((c) => c.fromAgentId === sourceAgentId);
+    for (const conn of outgoing) {
+      const sessionId = useTerminalStore.getState().getSessionIdByAgentId(conn.toAgentId);
+      if (!sessionId) continue;
+      const subtask = `[Delegated from ${sourceAgentId}]: ${task}`;
+      await window.electron?.writePty(sessionId, subtask + '\n');
+    }
+  }, [teams]);
 
   // Initialize positions for agents
   useEffect(() => {
@@ -178,15 +200,21 @@ export function Topology() {
 
       const targetId = agentEl?.dataset.agentId;
       if (targetId && targetId !== draw.fromId) {
-        setLocalConnections((prev) => {
-          const exists = prev.some(
-            (c) =>
-              (c.fromId === draw.fromId && c.toId === targetId) ||
-              (c.fromId === targetId && c.toId === draw.fromId)
-          );
-          if (exists) return prev;
-          return [...prev, { id: crypto.randomUUID(), fromId: draw.fromId, toId: targetId }];
-        });
+        if (selectedTeamId) {
+          // Persist to teamStore so the connection survives navigation
+          addConnection(selectedTeamId, { fromAgentId: draw.fromId, toAgentId: targetId });
+        } else {
+          // No team selected: fall back to local (in-memory) display
+          setLocalConnections((prev) => {
+            const exists = prev.some(
+              (c) =>
+                (c.fromId === draw.fromId && c.toId === targetId) ||
+                (c.fromId === targetId && c.toId === draw.fromId)
+            );
+            if (exists) return prev;
+            return [...prev, { id: crypto.randomUUID(), fromId: draw.fromId, toId: targetId }];
+          });
+        }
       }
       setConnectionDrawSync(null);
     };
@@ -544,7 +572,25 @@ export function Topology() {
                 );
               })}
 
-              {/* Freeform agent-to-agent connections */}
+              {/* Persisted team connections rendered on canvas */}
+              {selectedTeamConnections.map((conn) => {
+                const from = nodePositions[conn.fromAgentId];
+                const to = nodePositions[conn.toAgentId];
+                if (!from || !to) return null;
+                return (
+                  <path
+                    key={`team-${conn.id}`}
+                    d={getBezierPath(from.x + NODE_WIDTH / 2, from.y, to.x - NODE_WIDTH / 2, to.y)}
+                    stroke="#97a9ff"
+                    strokeWidth="2.5"
+                    strokeOpacity="0.85"
+                    fill="none"
+                    markerEnd="url(#arrowhead)"
+                  />
+                );
+              })}
+
+              {/* Freeform agent-to-agent connections (no team selected — in-memory only) */}
               {localConnections.map((conn) => {
                 const from = nodePositions[conn.fromId];
                 const to = nodePositions[conn.toId];
@@ -555,7 +601,8 @@ export function Topology() {
                     d={getBezierPath(from.x + NODE_WIDTH / 2, from.y, to.x - NODE_WIDTH / 2, to.y)}
                     stroke="#97a9ff"
                     strokeWidth="2.5"
-                    strokeOpacity="0.85"
+                    strokeOpacity="0.45"
+                    strokeDasharray="5 3"
                     fill="none"
                     markerEnd="url(#arrowhead)"
                   />

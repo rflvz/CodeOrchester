@@ -8,7 +8,9 @@ export interface Agent {
   teamId: string | null;
   skills: string[];
   currentTask: string | null;
-  trabajoTerminado: boolean;
+  trabajoTerminado: boolean; // TODO: Consider renaming to isComplete/finished for English consistency
+  icon?: string;
+  instructions?: string;
   createdAt: Date;
 }
 
@@ -20,6 +22,7 @@ export interface Team {
   topology: 'hierarchical' | 'mesh' | 'star' | 'chain';
   connections: AgentConnection[];
   createdAt: Date;
+  // TODO: Add optional status, description metadata, and owner fields as the model grows
 }
 
 export interface AgentConnection {

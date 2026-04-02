@@ -5,6 +5,44 @@ import os from 'os';
 
 let mainWindow: BrowserWindow | null = null;
 const ptys: Map<string, IPty> = new Map();
+// Rastrear sesiones esperando respuesta de Claude — se emite 'claude-awaiting-input' cuando llega data
+const awaitingResponse: Set<string> = new Set();
+
+interface AppSettings {
+  minimaxApiKey: string;
+  minimaxAppId: string;
+  claudeCliPath: string;
+  claudeWorkDir: string;
+  darkMode: boolean;
+  desktopNotifications: boolean;
+  notificationSound: boolean;
+  fontSize: 'sm' | 'md' | 'lg';
+  accentColor: 'indigo' | 'violet' | 'cyan' | 'emerald';
+  density: 'compact' | 'normal' | 'relaxed';
+  animationsEnabled: boolean;
+}
+
+const defaultSettings: AppSettings = {
+  minimaxApiKey: '',
+  minimaxAppId: '',
+  claudeCliPath: 'claude',
+  claudeWorkDir: '',
+  darkMode: true,
+  desktopNotifications: true,
+  notificationSound: true,
+  fontSize: 'md',
+  accentColor: 'indigo',
+  density: 'normal',
+  animationsEnabled: true,
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let store: any = null;
+
+async function initStore() {
+  const { default: Store } = await import('electron-store');
+  store = new Store({ defaults: { settings: defaultSettings, agents: {} } });
+}
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
@@ -51,7 +89,8 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await initStore();
   createWindow();
 
   app.on('activate', () => {
@@ -67,8 +106,43 @@ app.on('window-all-closed', () => {
   }
 });
 
-// IPC Handlers
-ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string) => {
+// IPC Handlers — settings and agent persistence
+ipcMain.handle('get-settings', () => {
+  const saved = store?.get('settings') ?? {};
+  return { ...defaultSettings, ...saved };
+});
+
+ipcMain.handle('set-settings', (_event, updates: Partial<AppSettings>) => {
+  const current = store?.get('settings') ?? defaultSettings;
+  store?.set('settings', { ...current, ...updates });
+  return { success: true };
+});
+
+ipcMain.handle('get-agent-state', () => {
+  return store?.get('agents') ?? {};
+});
+
+ipcMain.handle('set-agent-state', (_event, agents: Record<string, unknown>) => {
+  store?.set('agents', agents);
+  return { success: true };
+});
+
+ipcMain.handle('get-system-metrics', () => {
+  const mem = process.memoryUsage();
+  const cpus = os.cpus();
+  const load = cpus.reduce((acc, cpu) => {
+    const total = Object.values(cpu.times).reduce((a, b) => a + b, 0);
+    return acc + ((total - cpu.times.idle) / total) * 100;
+  }, 0) / cpus.length;
+  return {
+    cpuPercent: Math.round(load * 10) / 10,
+    memoryMB: Math.round(mem.rss / 1024 / 1024),
+    memoryTotalMB: Math.round(os.totalmem() / 1024 / 1024),
+  };
+});
+
+// IPC Handlers — PTY
+ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string, initialPrompt?: string) => {
   // Kill any existing session with the same ID to prevent leaks
   const existing = ptys.get(sessionId);
   if (existing) {
@@ -76,19 +150,51 @@ ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string) => {
     ptys.delete(sessionId);
   }
 
-  const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
-  const pty = spawn(shell, [], {
-    cwd: cwd || os.homedir(),
-    env: {
-      ...process.env,
-      MINIMAX_API_KEY: process.env.MINIMAX_API_KEY || '',
-    } as Record<string, string>,
+  const savedSettings: AppSettings = store?.get('settings') ?? defaultSettings;
+  const resolvedClaCliPath = savedSettings.claudeCliPath?.trim() || '';
+  // On Windows, use cmd.exe /c to properly resolve 'claude' via PATH (just like terminal does)
+  const useCmd = process.platform === 'win32';
+  const claudeCmd = resolvedClaCliPath || 'claude';
+  const claudePath = useCmd ? 'cmd.exe' : claudeCmd;
+  const claudeArgs = useCmd ? ['/c', claudeCmd] : [];
+
+  const ptyEnv: Record<string, string> = {
+    ...process.env,
+    MINIMAX_API_KEY: savedSettings.minimaxApiKey || process.env.MINIMAX_API_KEY || '',
+    MINIMAX_APP_ID: savedSettings.minimaxAppId || process.env.MINIMAX_APP_ID || '',
+  };
+
+  const resolvedCwd = cwd?.trim() || savedSettings.claudeWorkDir?.trim() || os.homedir();
+
+  const pty = spawn(claudePath, claudeArgs, {
+    cwd: resolvedCwd,
+    env: ptyEnv,
   });
 
   ptys.set(sessionId, pty);
 
+  // Auto-accept workspace trust prompt on Windows (appears ~1s after spawn)
+  if (process.platform === 'win32') {
+    await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+    pty.write('\r'); // Accept workspace trust prompt
+  }
+
+  // Escribir el prompt inicial con el contexto del agente (instructions + skills)
+  // después de que el workspace sea aceptado y Claude esté listo
+  if (initialPrompt) {
+    awaitingResponse.add(sessionId);
+    await new Promise<void>((resolve) => setTimeout(resolve, 2500)); // Wait for Claude to fully start
+    pty.write(initialPrompt + '\n');
+  }
+
   pty.onData((data) => {
     mainWindow?.webContents.send('pty-data', { sessionId, data });
+
+    // Si estabamos esperando respuesta de Claude, esta data es la respuesta — notificar al renderer
+    if (awaitingResponse.has(sessionId)) {
+      awaitingResponse.delete(sessionId);
+      mainWindow?.webContents.send('claude-awaiting-input', { sessionId });
+    }
 
     // Parse trabajo_terminado flag
     if (data.includes('trabajo_terminado=true')) {
@@ -99,6 +205,7 @@ ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string) => {
   });
 
   pty.onExit(({ exitCode }) => {
+    awaitingResponse.delete(sessionId);
     mainWindow?.webContents.send('pty-exit', { sessionId, exitCode });
     ptys.delete(sessionId);
   });
@@ -109,6 +216,7 @@ ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string) => {
 ipcMain.handle('write-pty', async (_event, sessionId: string, data: string) => {
   const pty = ptys.get(sessionId);
   if (pty) {
+    awaitingResponse.add(sessionId);
     pty.write(data);
     return { success: true };
   }

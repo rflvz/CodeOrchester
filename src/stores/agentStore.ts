@@ -1,5 +1,7 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { Agent, AgentStatus } from '../types';
+import { electronStorage } from './electronStorage';
 
 interface AgentStore {
   agents: Record<string, Agent>;
@@ -15,74 +17,83 @@ interface AgentStore {
 
 const generateId = () => crypto.randomUUID();
 
-export const useAgentStore = create<AgentStore>((set, get) => ({
-  agents: {},
-  activeAgentId: null,
+export const useAgentStore = create<AgentStore>()(
+  persist(
+    (set, _get) => ({
+      agents: {},
+      activeAgentId: null,
 
-  createAgent: (agentData) => {
-    const id = generateId();
-    const agent: Agent = {
-      ...agentData,
-      id,
-      createdAt: new Date(),
-    };
-    set((state) => ({
-      agents: { ...state.agents, [id]: agent },
-    }));
-    return agent;
-  },
+      createAgent: (agentData) => {
+        const id = generateId();
+        const agent: Agent = {
+          ...agentData,
+          id,
+          createdAt: new Date(),
+        };
+        set((state) => ({
+          agents: { ...state.agents, [id]: agent },
+        }));
+        return agent;
+      },
 
-  updateAgent: (id, updates) => {
-    set((state) => {
-      const agent = state.agents[id];
-      if (!agent) return state;
-      return {
-        agents: {
-          ...state.agents,
-          [id]: { ...agent, ...updates },
-        },
-      };
-    });
-  },
+      updateAgent: (id, updates) => {
+        set((state) => {
+          const agent = state.agents[id];
+          if (!agent) return state;
+          return {
+            agents: {
+              ...state.agents,
+              [id]: { ...agent, ...updates },
+            },
+          };
+        });
+      },
 
-  deleteAgent: (id) => {
-    set((state) => {
-      const { [id]: _, ...rest } = state.agents;
-      return {
-        agents: rest,
-        activeAgentId: state.activeAgentId === id ? null : state.activeAgentId,
-      };
-    });
-  },
+      deleteAgent: (id) => {
+        set((state) => {
+          const { [id]: _, ...rest } = state.agents;
+          return {
+            agents: rest,
+            activeAgentId: state.activeAgentId === id ? null : state.activeAgentId,
+          };
+        });
+      },
 
-  setActiveAgent: (id) => {
-    set({ activeAgentId: id });
-  },
+      setActiveAgent: (id) => {
+        set({ activeAgentId: id });
+      },
 
-  setTrabajoTerminado: (id, value) => {
-    set((state) => {
-      const agent = state.agents[id];
-      if (!agent) return state;
-      const status: AgentStatus = value ? 'success' : 'idle';
-      return {
-        agents: {
-          ...state.agents,
-          [id]: { ...agent, trabajoTerminado: value, status },
-        },
-      };
-    });
-  },
+      setTrabajoTerminado: (id, value) => {
+        set((state) => {
+          const agent = state.agents[id];
+          if (!agent) return state;
+          const status: AgentStatus = value ? 'success' : 'idle';
+          return {
+            agents: {
+              ...state.agents,
+              [id]: { ...agent, trabajoTerminado: value, status },
+            },
+          };
+        });
+      },
 
-  setAgentStatus: (id, status) => {
-    set((state) => {
-      const agent = state.agents[id];
-      if (!agent) return state;
-      return {
-        agents: {
-          ...state.agents,
-          [id]: { ...agent, status },
-        },
-      };
-    });
-  },
-}));
+      setAgentStatus: (id, status) => {
+        set((state) => {
+          const agent = state.agents[id];
+          if (!agent) return state;
+          return {
+            agents: {
+              ...state.agents,
+              [id]: { ...agent, status },
+            },
+          };
+        });
+      },
+    }),
+    {
+      name: 'agent-store',
+      storage: createJSONStorage(() => electronStorage),
+      partialize: (state) => ({ agents: state.agents }),
+    }
+  )
+);
