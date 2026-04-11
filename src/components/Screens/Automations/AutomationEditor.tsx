@@ -100,6 +100,21 @@ export function AutomationEditor() {
     }
   };
 
+  // Evaluación simple de condiciones. Admite expresiones como: "agent.status === 'active'"
+  // IMPORTANT: must be defined BEFORE handleRun — const arrow functions are not hoisted.
+  const evaluateCondition = (expr: string): boolean => {
+    try {
+      const agents = useAgentStore.getState().agents;
+      // eslint-disable-next-line no-new-func
+      return new Function('agents', `return ${expr}`)(agents) as boolean;
+    } catch {
+      addLog('ERROR', `Condition evaluation failed: ${expr}`);
+      return false;
+    }
+  };
+
+  const ACTION_TIMEOUT_MS = 60_000;
+
   const handleRun = async () => {
     setIsRunning(true);
     addLog('SYSTEM', 'Starting automation run...');
@@ -143,12 +158,20 @@ export function AutomationEditor() {
 
         await window.electron?.writePty(sessionId, step.prompt + '\n');
 
-        // Esperar trabajo_terminado para este agentId
+        // Esperar trabajo_terminado para este agentId con timeout máximo de 60 segundos
         const done = await new Promise<boolean>((resolve) => {
-          const interval = setInterval(() => {
+          let interval: ReturnType<typeof setInterval>;
+          const timeout = setTimeout(() => {
+            clearInterval(interval);
+            addLog('ERROR', `Timeout waiting for agent ${step.agentId} to complete`);
+            resolve(false);
+          }, ACTION_TIMEOUT_MS);
+
+          interval = setInterval(() => {
             const agent = useAgentStore.getState().agents[step.agentId!];
             if (agent?.trabajoTerminado !== undefined) {
               clearInterval(interval);
+              clearTimeout(timeout);
               resolve(agent.trabajoTerminado);
             }
           }, 200);
@@ -169,19 +192,6 @@ export function AutomationEditor() {
 
     setIsRunning(false);
     addLog('SYSTEM', 'Automation run completed');
-  };
-
-  // Evaluación simple de condiciones. Admite expresiones como: "agent.status === 'active'"
-  const evaluateCondition = (expr: string): boolean => {
-    try {
-      const agents = useAgentStore.getState().agents;
-      const agentList = Object.values(agents);
-      // eslint-disable-next-line no-new-func
-      return new Function('agents', `return ${expr}`)(agents) as boolean;
-    } catch {
-      addLog('ERROR', `Condition evaluation failed: ${expr}`);
-      return false;
-    }
   };
 
   const handleReset = () => {
