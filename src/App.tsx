@@ -33,10 +33,16 @@ function App() {
       // This listener exists to prevent orphaned listeners on the channel.
     });
 
+    // Register pty-error channel — propagate Claude CLI errors to the store
+    const removePtyError = el.onPtyError(({ sessionId, message }) => {
+      useTerminalStore.getState().pushError(sessionId, message);
+    });
+
     return () => {
       removePtyData();
       removeTrabajoTerminado();
       removeClaudeStream();
+      removePtyError();
     };
   }, [pushLogs, setTrabajoTerminado]);
 

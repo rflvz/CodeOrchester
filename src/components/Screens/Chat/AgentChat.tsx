@@ -81,11 +81,11 @@ export function AgentChat() {
 
     const newMsgs: ChatMessage[] = newLogs.map(l => ({
       id: crypto.randomUUID(),
-      type: 'agent' as const,
-      content: l.line,
+      type: l.isError ? ('system' as const) : ('agent' as const),
+      content: l.isError ? `⚠️ ${l.line}` : l.line,
       timestamp: new Date(l.ts),
-      agentId: activeAgent.id,
-      agentName: activeAgent.name,
+      agentId: l.isError ? undefined : activeAgent.id,
+      agentName: l.isError ? undefined : activeAgent.name,
       status: 'sent' as const,
     }));
 
@@ -101,6 +101,10 @@ export function AgentChat() {
         },
       };
     });
+
+    // Stop processing indicator when we receive new content
+    setIsProcessing(false);
+    setTypingAgents(new Set());
   }, [recentLogs, activeAgentId, activeConversationId, activeAgent]);
 
   const scrollToBottom = () => {
@@ -173,7 +177,7 @@ export function AgentChat() {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || !activeAgent) return;
+    if (!input.trim() || !activeAgent || isProcessing) return;
 
     // Capturar input ANTES de limpiar state — de lo contrario writePty recibe ''
     const textToSend = input.trim();
@@ -202,8 +206,23 @@ export function AgentChat() {
     // Write to the real PTY session
     const sessionId = useTerminalStore.getState().getSessionIdByAgentId(activeAgent.id);
     if (!sessionId) {
-      // No hay sesión PTY — notificar al usuario
+      // No hay sesión PTY — notificar al usuario con mensaje de error en el chat
       console.error('[AgentChat] No PTY session found for agent:', activeAgent.id);
+      if (activeConversationId) {
+        const errorMsg: ChatMessage = {
+          id: crypto.randomUUID(),
+          type: 'system',
+          content: '⚠️ No active PTY session for this agent. Please re-select the agent to restart the session.',
+          timestamp: new Date(),
+        };
+        setConversations((prev) => ({
+          ...prev,
+          [activeConversationId]: {
+            ...prev[activeConversationId],
+            messages: [...(prev[activeConversationId]?.messages ?? []), errorMsg],
+          },
+        }));
+      }
       return;
     }
 
@@ -212,10 +231,32 @@ export function AgentChat() {
       : 'You have no specific skills configured.';
     const initialPrompt = `You are ${activeAgent.name}. ${activeAgent.instructions || ''}\n\n${skillsContext}`;
 
+    // Show typing indicator while waiting for response
+    setIsProcessing(true);
+    setTypingAgents(new Set([activeAgent.id]));
+
     try {
-      await window.electron?.writePty(sessionId, textToSend + '\n', initialPrompt);
+      await window.electron?.writePty(sessionId, textToSend, initialPrompt);
     } catch (err) {
       console.error('[AgentChat] writePty failed:', err);
+      setIsProcessing(false);
+      setTypingAgents(new Set());
+      // Show error in chat
+      if (activeConversationId) {
+        const errorMsg: ChatMessage = {
+          id: crypto.randomUUID(),
+          type: 'system',
+          content: `⚠️ Failed to send message: ${err instanceof Error ? err.message : String(err)}`,
+          timestamp: new Date(),
+        };
+        setConversations((prev) => ({
+          ...prev,
+          [activeConversationId]: {
+            ...prev[activeConversationId],
+            messages: [...(prev[activeConversationId]?.messages ?? []), errorMsg],
+          },
+        }));
+      }
     }
   };
 
@@ -585,7 +626,9 @@ export function AgentChat() {
                         ) : (
                           <div
                             className={`rounded-lg p-3 ${
-                              message.type === 'system'
+                              message.type === 'system' && message.content.startsWith('⚠️')
+                                ? 'bg-error/10 text-error text-xs border-l-2 border-error'
+                                : message.type === 'system'
                                 ? 'bg-surface-container-lowest text-tertiary text-xs border-l-2 border-tertiary'
                                 : message.type === 'user'
                                 ? 'bg-primary-container/20 text-on-surface'

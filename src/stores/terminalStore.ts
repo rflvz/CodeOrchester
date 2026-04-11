@@ -5,6 +5,7 @@ export interface PtyLogEntry {
   sessionId: string;
   line: string;
   ts: string;
+  isError?: boolean;
 }
 
 const MAX_RECENT_LOGS = 100;
@@ -22,6 +23,7 @@ interface TerminalStore {
   setActiveSession: (id: string | null) => void;
   updateSession: (id: string, updates: Partial<TerminalSession>) => void;
   pushLogs: (sessionId: string, data: string) => void;
+  pushError: (sessionId: string, message: string) => void;
   registerAgentSession: (agentId: string, sessionId: string) => void;
   unregisterAgentSession: (agentId: string) => void;
   getSessionIdByAgentId: (agentId: string) => string | undefined;
@@ -91,6 +93,15 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     const entries: PtyLogEntry[] = lines.map((line) => ({ sessionId, line, ts }));
     set((state) => {
       const updated = [...state.recentLogs, ...entries];
+      return { recentLogs: updated.slice(-MAX_RECENT_LOGS) };
+    });
+  },
+
+  pushError: (sessionId, message) => {
+    const ts = new Date().toISOString();
+    const entry: PtyLogEntry = { sessionId, line: message, ts, isError: true };
+    set((state) => {
+      const updated = [...state.recentLogs, entry];
       return { recentLogs: updated.slice(-MAX_RECENT_LOGS) };
     });
   },

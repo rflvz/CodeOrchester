@@ -6,11 +6,10 @@ import os from 'os';
 let mainWindow: BrowserWindow | null = null;
 const ptys: Map<string, IPty> = new Map();
 
-// Per-session conversation history for multi-turn context
-// Each entry: { role: 'user' | 'assistant', content: string }
-interface ChatMessage { role: 'user' | 'assistant'; content: string; }
-const conversationHistory: Map<string, ChatMessage[]> = new Map();
-// Per-session agent identity (system prompt)
+// Per-session Claude CLI session UUIDs for --resume persistence
+// sessionId (PTY/agent) → claudeUUID (passed to --session-id / --resume)
+const claudeSessionIds: Map<string, string> = new Map();
+// Per-session agent identity (system prompt for first turn)
 const agentIdentity: Map<string, string> = new Map();
 // Per-session line buffer for NDJSON parsing (claude -p --output-format stream-json)
 const jsonLineBuffer: Map<string, string> = new Map();
@@ -160,7 +159,7 @@ ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string, initi
     ptys.delete(sessionId);
   }
   jsonLineBuffer.delete(sessionId);
-  conversationHistory.delete(sessionId);
+  claudeSessionIds.delete(sessionId);
 
   const savedSettings: AppSettings = store?.get('settings') ?? defaultSettings;
   const resolvedClaCliPath = savedSettings.claudeCliPath?.trim() || '';
@@ -177,12 +176,10 @@ ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string, initi
   const claudePath = useCmd ? 'cmd.exe' : claudeCmd;
 
   if (initialPrompt) {
-    // Agent session: store identity and initialize history; actual PTY spawned on first write-pty.
-    const history: ChatMessage[] = [];
-    conversationHistory.set(sessionId, history);
+    // Agent session: store identity; actual PTY spawned on first write-pty.
     agentIdentity.set(sessionId, initialPrompt);
     jsonLineBuffer.set(sessionId, '');
-    // No PTY spawned here — write-pty handles that lazily
+    // claudeSessionIds not set yet — will be created on first write-pty
 
     return { success: true };
   }
@@ -191,7 +188,6 @@ ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string, initi
   const args = useCmd ? ['/c', claudeCmd] : [claudeCmd];
   const pty = spawn(claudePath, args, { cwd: resolvedCwd, env: ptyEnv });
   ptys.set(sessionId, pty);
-  conversationHistory.set(sessionId, []);
   jsonLineBuffer.set(sessionId, '');
 
   if (process.platform === 'win32') {
@@ -211,7 +207,6 @@ ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string, initi
   pty.onExit(({ exitCode }) => {
     mainWindow?.webContents.send('pty-exit', { sessionId, exitCode });
     ptys.delete(sessionId);
-    conversationHistory.delete(sessionId);
     jsonLineBuffer.delete(sessionId);
   });
 
@@ -219,10 +214,8 @@ ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string, initi
 });
 
 ipcMain.handle('write-pty', async (_event, sessionId: string, data: string, initialPrompt?: string) => {
-  // Lazy initialization: if no PTY exists for this session, initialize the history
-  // and identity. This handles the race where handleSend fires before start-pty completes.
-  if (!conversationHistory.has(sessionId)) {
-    conversationHistory.set(sessionId, []);
+  // Lazy initialization: handle the race where handleSend fires before start-pty completes.
+  if (!jsonLineBuffer.has(sessionId)) {
     jsonLineBuffer.set(sessionId, '');
   }
   if (initialPrompt && !agentIdentity.has(sessionId)) {
@@ -235,7 +228,7 @@ ipcMain.handle('write-pty', async (_event, sessionId: string, data: string, init
     try { existing.kill(); } catch { /* ignore */ }
     ptys.delete(sessionId);
   }
-  jsonLineBuffer.delete(sessionId);
+  jsonLineBuffer.set(sessionId, '');
 
   const savedSettings: AppSettings = store?.get('settings') ?? defaultSettings;
   const resolvedClaCliPath = savedSettings.claudeCliPath?.trim() || '';
@@ -247,33 +240,43 @@ ipcMain.handle('write-pty', async (_event, sessionId: string, data: string, init
     MINIMAX_APP_ID: savedSettings.minimaxAppId || process.env.MINIMAX_APP_ID || '',
   };
 
-  const history = conversationHistory.get(sessionId)!;
   const identity = agentIdentity.get(sessionId) ?? '';
-
-  // Build full prompt: agent identity (if first turn) + conversation history + new user message
-  const historyText = history.length > 0
-    ? '\n\nConversation so far:\n' + history.map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`).join('\n')
-    : '';
-  const firstTurnPrefix = history.length === 0 && identity ? identity + '\n\n' : '';
-  const fullPrompt = firstTurnPrefix + historyText + '\n\nUser: ' + data;
-
-  // Add user message to history
-  history.push({ role: 'user', content: data });
+  const existingClaudeSessionId = claudeSessionIds.get(sessionId);
 
   const useCmd = process.platform === 'win32';
   const claudeCmd = resolvedClaCliPath || 'claude';
   const claudePath = useCmd ? 'cmd.exe' : claudeCmd;
-  const args = useCmd
-    ? ['/c', claudeCmd, '-p', '--verbose', '--output-format', 'stream-json', '--no-session-persistence', '--', fullPrompt]
-    : [claudeCmd, '-p', '--verbose', '--output-format', 'stream-json', '--no-session-persistence', '--', fullPrompt];
+
+  let args: string[];
+  if (existingClaudeSessionId) {
+    // Subsequent turns: use --resume to continue the existing Claude CLI session
+    args = useCmd
+      ? ['/c', claudeCmd, '-p', '--resume', existingClaudeSessionId,
+         '--output-format', 'stream-json', '--include-partial-messages', '--', data.trim()]
+      : [claudeCmd, '-p', '--resume', existingClaudeSessionId,
+         '--output-format', 'stream-json', '--include-partial-messages', '--', data.trim()];
+  } else {
+    // First turn: create a new Claude CLI session with --session-id and --system-prompt
+    const sessionUUID = crypto.randomUUID();
+    claudeSessionIds.set(sessionId, sessionUUID);
+    args = useCmd
+      ? ['/c', claudeCmd, '-p', '--session-id', sessionUUID,
+         '--system-prompt', identity,
+         '--output-format', 'stream-json', '--include-partial-messages', '--', data.trim()]
+      : [claudeCmd, '-p', '--session-id', sessionUUID,
+         '--system-prompt', identity,
+         '--output-format', 'stream-json', '--include-partial-messages', '--', data.trim()];
+  }
 
   const pty = spawn(claudePath, args, { cwd: resolvedCwd, env: ptyEnv });
   ptys.set(sessionId, pty);
   jsonLineBuffer.set(sessionId, '');
 
-  pty.onData((data: string) => {
+  let stderrOutput = '';
+
+  pty.onData((rawData: string) => {
     // Accumulate raw PTY output, parse NDJSON lines
-    const buffered = (jsonLineBuffer.get(sessionId) ?? '') + data;
+    const buffered = (jsonLineBuffer.get(sessionId) ?? '') + rawData;
     jsonLineBuffer.set(sessionId, buffered);
     const lines = buffered.split(/\r?\n/);
     jsonLineBuffer.set(sessionId, lines.pop() ?? '');
@@ -284,30 +287,63 @@ ipcMain.handle('write-pty', async (_event, sessionId: string, data: string, init
         const event = JSON.parse(line);
         // Forward full event for raw JSON logging (on separate channel)
         mainWindow?.webContents.send('claude-stream', { sessionId, event });
-        // Extract clean text and send via pty-data for display
-        if (event.type === 'result' && (event as { result?: string }).result !== undefined) {
-          const result = (event as { result?: string }).result ?? '';
-          history.push({ role: 'assistant', content: result });
-          // Send each line of the result as a pty-data entry
-          const textLines = result.split('\n').filter(l => l.trim());
-          for (const tl of textLines) {
-            mainWindow?.webContents.send('pty-data', { sessionId, data: tl });
-          }
-          // Parse trabajo_terminado
-          if (result.includes('trabajo_terminado=true')) {
-            mainWindow?.webContents.send('trabajo-terminado', { sessionId, value: true });
-          } else if (result.includes('trabajo_terminado=false')) {
-            mainWindow?.webContents.send('trabajo-terminado', { sessionId, value: false });
-          }
+
+        // Handle error events from Claude CLI
+        if (event.type === 'error') {
+          const errMsg = (event as { error?: { message?: string } }).error?.message
+            ?? (event as { message?: string }).message
+            ?? 'Unknown error';
+          stderrOutput += errMsg + '\n';
+          mainWindow?.webContents.send('pty-error', { sessionId, message: errMsg });
         }
-        // Also extract streaming text from content_block_delta if available
+
+        // Extract streaming text from content_block_delta (partial messages)
         if (event.type === 'content_block_delta') {
-          const delta = (event as { delta?: { text?: string } }).delta;
+          const delta = (event as { delta?: { type?: string; text?: string } }).delta;
           if (delta?.text) {
             const textLines = delta.text.split('\n').filter(l => l.trim());
             for (const tl of textLines) {
               mainWindow?.webContents.send('pty-data', { sessionId, data: tl });
             }
+          }
+        }
+
+        // Handle assistant message events (streaming partial messages)
+        if (event.type === 'assistant') {
+          const content = (event as { message?: { content?: { type?: string; text?: string }[] } }).message?.content;
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === 'text' && block.text) {
+                const textLines = block.text.split('\n').filter((l: string) => l.trim());
+                for (const tl of textLines) {
+                  mainWindow?.webContents.send('pty-data', { sessionId, data: tl });
+                }
+              }
+            }
+          }
+        }
+
+        // Extract clean text from the final result event
+        if (event.type === 'result' && (event as { result?: string }).result !== undefined) {
+          const result = (event as { result?: string }).result ?? '';
+
+          // Update claudeSessionIds if the result carries a session_id
+          const resultSessionId = (event as { session_id?: string }).session_id;
+          if (resultSessionId) {
+            claudeSessionIds.set(sessionId, resultSessionId);
+          }
+
+          // Send each line of the result as pty-data
+          const textLines = result.split('\n').filter(l => l.trim());
+          for (const tl of textLines) {
+            mainWindow?.webContents.send('pty-data', { sessionId, data: tl });
+          }
+
+          // Parse trabajo_terminado
+          if (result.includes('trabajo_terminado=true')) {
+            mainWindow?.webContents.send('trabajo-terminado', { sessionId, value: true });
+          } else if (result.includes('trabajo_terminado=false')) {
+            mainWindow?.webContents.send('trabajo-terminado', { sessionId, value: false });
           }
         }
       } catch { /* incomplete JSON — will be processed when more data arrives */ }
@@ -318,6 +354,14 @@ ipcMain.handle('write-pty', async (_event, sessionId: string, data: string, init
     jsonLineBuffer.delete(sessionId);
     mainWindow?.webContents.send('pty-exit', { sessionId, exitCode });
     ptys.delete(sessionId);
+
+    // On non-zero exit, clear the Claude session ID so next turn starts fresh,
+    // and notify the renderer about the failure.
+    if (exitCode !== 0) {
+      claudeSessionIds.delete(sessionId);
+      const errMsg = stderrOutput.trim() || `Claude CLI exited with code ${exitCode}`;
+      mainWindow?.webContents.send('pty-error', { sessionId, message: errMsg });
+    }
   });
 
   return { success: true };
@@ -337,7 +381,7 @@ ipcMain.handle('kill-pty', async (_event, sessionId: string) => {
   if (pty) {
     pty.kill();
     ptys.delete(sessionId);
-    conversationHistory.delete(sessionId);
+    claudeSessionIds.delete(sessionId);
     agentIdentity.delete(sessionId);
     jsonLineBuffer.delete(sessionId);
     return { success: true };

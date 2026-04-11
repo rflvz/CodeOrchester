@@ -37,6 +37,7 @@ export interface ElectronAPI {
   windowIsMaximized: () => Promise<boolean>;
   onWindowMaximized: (callback: (maximized: boolean) => void) => () => void;
   onClaudeStream: (callback: (data: { sessionId: string; event: Record<string, unknown> }) => void) => () => void;
+  onPtyError: (callback: (data: { sessionId: string; message: string }) => void) => () => void;
   getSettings: () => Promise<AppSettings>;
   setSettings: (updates: Partial<AppSettings>) => Promise<{ success: boolean }>;
   getAgentState: () => Promise<Record<string, unknown>>;
@@ -84,6 +85,11 @@ const api: ElectronAPI = {
     const listener = (_: IpcRendererEvent, data: { sessionId: string; event: Record<string, unknown> }) => callback(data);
     ipcRenderer.on('claude-stream', listener);
     return () => ipcRenderer.removeListener('claude-stream', listener);
+  },
+  onPtyError: (callback) => {
+    const listener = (_: IpcRendererEvent, data: { sessionId: string; message: string }) => callback(data);
+    ipcRenderer.on('pty-error', listener);
+    return () => ipcRenderer.removeListener('pty-error', listener);
   },
   getSettings: () => ipcRenderer.invoke('get-settings'),
   setSettings: (updates) => ipcRenderer.invoke('set-settings', updates),
