@@ -1,5 +1,7 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { Team, AgentConnection } from '../types';
+import { electronStorage } from './electronStorage';
 
 interface TeamStore {
   teams: Record<string, Team>;
@@ -17,106 +19,115 @@ interface TeamStore {
 
 const generateId = () => crypto.randomUUID();
 
-export const useTeamStore = create<TeamStore>((set) => ({
-  teams: {},
-  activeTeamId: null,
+export const useTeamStore = create<TeamStore>()(
+  persist(
+    (set) => ({
+      teams: {},
+      activeTeamId: null,
 
-  createTeam: (teamData) => {
-    const id = generateId();
-    const team: Team = {
-      ...teamData,
-      id,
-      createdAt: new Date(),
-    };
-    set((state) => ({
-      teams: { ...state.teams, [id]: team },
-    }));
-    return team;
-  },
+      createTeam: (teamData) => {
+        const id = generateId();
+        const team: Team = {
+          ...teamData,
+          id,
+          createdAt: new Date(),
+        };
+        set((state) => ({
+          teams: { ...state.teams, [id]: team },
+        }));
+        return team;
+      },
 
-  updateTeam: (id, updates) => {
-    set((state) => {
-      const team = state.teams[id];
-      if (!team) return state;
-      return {
-        teams: { ...state.teams, [id]: { ...team, ...updates } },
-      };
-    });
-  },
+      updateTeam: (id, updates) => {
+        set((state) => {
+          const team = state.teams[id];
+          if (!team) return state;
+          return {
+            teams: { ...state.teams, [id]: { ...team, ...updates } },
+          };
+        });
+      },
 
-  deleteTeam: (id) => {
-    set((state) => {
-      const { [id]: _, ...rest } = state.teams;
-      return {
-        teams: rest,
-        activeTeamId: state.activeTeamId === id ? null : state.activeTeamId,
-      };
-    });
-  },
+      deleteTeam: (id) => {
+        set((state) => {
+          const { [id]: _, ...rest } = state.teams;
+          return {
+            teams: rest,
+            activeTeamId: state.activeTeamId === id ? null : state.activeTeamId,
+          };
+        });
+      },
 
-  setActiveTeam: (id) => {
-    set({ activeTeamId: id });
-  },
+      setActiveTeam: (id) => {
+        set({ activeTeamId: id });
+      },
 
-  addAgentToTeam: (agentId, teamId) => {
-    set((state) => {
-      const team = state.teams[teamId];
-      if (!team || team.agents.includes(agentId)) return state;
-      return {
-        teams: {
-          ...state.teams,
-          [teamId]: { ...team, agents: [...team.agents, agentId] },
-        },
-      };
-    });
-  },
+      addAgentToTeam: (agentId, teamId) => {
+        set((state) => {
+          const team = state.teams[teamId];
+          if (!team || team.agents.includes(agentId)) return state;
+          return {
+            teams: {
+              ...state.teams,
+              [teamId]: { ...team, agents: [...team.agents, agentId] },
+            },
+          };
+        });
+      },
 
-  removeAgentFromTeam: (agentId, teamId) => {
-    set((state) => {
-      const team = state.teams[teamId];
-      if (!team) return state;
-      return {
-        teams: {
-          ...state.teams,
-          [teamId]: { ...team, agents: team.agents.filter((id) => id !== agentId) },
-        },
-      };
-    });
-  },
+      removeAgentFromTeam: (agentId, teamId) => {
+        set((state) => {
+          const team = state.teams[teamId];
+          if (!team) return state;
+          return {
+            teams: {
+              ...state.teams,
+              [teamId]: { ...team, agents: team.agents.filter((id) => id !== agentId) },
+            },
+          };
+        });
+      },
 
-  addConnection: (teamId, connection) => {
-    set((state) => {
-      const team = state.teams[teamId];
-      if (!team) return state;
-      const exists = team.connections.some(
-        (c) => c.fromAgentId === connection.fromAgentId && c.toAgentId === connection.toAgentId
-      );
-      if (exists) return state;
-      return {
-        teams: {
-          ...state.teams,
-          [teamId]: {
-            ...team,
-            connections: [...team.connections, { ...connection, id: generateId() }],
-          },
-        },
-      };
-    });
-  },
+      addConnection: (teamId, connection) => {
+        set((state) => {
+          const team = state.teams[teamId];
+          if (!team) return state;
+          const exists = team.connections.some(
+            (c) => c.fromAgentId === connection.fromAgentId && c.toAgentId === connection.toAgentId
+          );
+          if (exists) return state;
+          return {
+            teams: {
+              ...state.teams,
+              [teamId]: {
+                ...team,
+                connections: [...team.connections, { ...connection, id: generateId() }],
+              },
+            },
+          };
+        });
+      },
 
-  removeConnection: (teamId, connectionId) => {
-    set((state) => {
-      const team = state.teams[teamId];
-      if (!team) return state;
-      return {
-        teams: {
-          ...state.teams,
-          [teamId]: {
-            ...team,
-            connections: team.connections.filter((c) => c.id !== connectionId),
-          },
-        },
-      };
-    });
-  },
-}));
+      removeConnection: (teamId, connectionId) => {
+        set((state) => {
+          const team = state.teams[teamId];
+          if (!team) return state;
+          return {
+            teams: {
+              ...state.teams,
+              [teamId]: {
+                ...team,
+                connections: team.connections.filter((c) => c.id !== connectionId),
+              },
+            },
+          };
+        });
+      },
+    }),
+    {
+      name: 'team-store',
+      storage: createJSONStorage(() => electronStorage),
+      partialize: (state) => ({ teams: state.teams }),
+    }
+  )
+);

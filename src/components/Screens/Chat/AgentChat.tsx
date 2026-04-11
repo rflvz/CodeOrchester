@@ -4,6 +4,7 @@ import {
   Search, Phone, Video, Settings, MessageSquare, ChevronDown, Clock, Trash2
 } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agentStore';
+import { useTerminalStore } from '../../../stores/terminalStore';
 import { useUIStore } from '../../../stores/uiStore';
 import { AgentAvatar } from '../../Shared/AgentAvatar';
 import { StatusChip } from '../../Shared/StatusChip';
@@ -35,7 +36,9 @@ export function AgentChat() {
 
   const [conversations, setConversations] = useState<Record<string, Conversation>>({});
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [agentSearchQuery, setAgentSearchQuery] = useState('');
+  // Derive messages from conversations — no duplicate state
+  const messages = activeConversationId ? (conversations[activeConversationId]?.messages ?? []) : [];
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -46,6 +49,59 @@ export function AgentChat() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [savedSettings, setSavedSettings] = useState<{ claudeWorkDir?: string; claudeCliPath?: string } | null>(null);
+
+  useEffect(() => {
+    window.electron?.getSettings().then((s) => {
+      if (s) setSavedSettings(s as { claudeWorkDir?: string; claudeCliPath?: string });
+    });
+  }, []);
+
+  // Ref para trackear cuántos logs del session activo ya se mostraron
+  const processedCountRef = useRef(0);
+
+  // Resetear contador de logs cuando cambia el agente activo
+  useEffect(() => {
+    processedCountRef.current = 0;
+  }, [activeAgentId]);
+
+  const recentLogs = useTerminalStore((state) => state.recentLogs);
+
+  useEffect(() => {
+    if (!activeAgentId || !activeConversationId || !activeAgent) return;
+
+    const sessionId = useTerminalStore.getState().getSessionIdByAgentId(activeAgentId);
+    if (!sessionId) return;
+
+    const sessionLogs = recentLogs.filter(l => l.sessionId === sessionId);
+    if (sessionLogs.length <= processedCountRef.current) return;
+
+    const newLogs = sessionLogs.slice(processedCountRef.current);
+    processedCountRef.current = sessionLogs.length;
+
+    const newMsgs: ChatMessage[] = newLogs.map(l => ({
+      id: crypto.randomUUID(),
+      type: 'agent' as const,
+      content: l.line,
+      timestamp: new Date(l.ts),
+      agentId: activeAgent.id,
+      agentName: activeAgent.name,
+      status: 'sent' as const,
+    }));
+
+    setConversations(prev => {
+      const conv = prev[activeConversationId];
+      if (!conv) return prev;
+      return {
+        ...prev,
+        [activeConversationId]: {
+          ...conv,
+          messages: [...conv.messages, ...newMsgs],
+          lastActivity: new Date(),
+        },
+      };
+    });
+  }, [recentLogs, activeAgentId, activeConversationId, activeAgent]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -84,82 +140,83 @@ export function AgentChat() {
     }
   }, [activeAgentId, activeAgent]);
 
-  // Sync messages when conversation changes
-  useEffect(() => {
-    if (activeConversationId && conversations[activeConversationId]) {
-      setMessages(conversations[activeConversationId].messages);
-    }
-  }, [activeConversationId, conversations]);
 
-  const handleSelectAgent = (agentId: string) => {
+  const handleSelectAgent = async (agentId: string) => {
     setActiveAgent(agentId);
     setShowAgentList(false);
+
+    const agent = agents[agentId];
+    if (!agent) return;
+
+    const skillsContext = agent.skills.length > 0
+      ? `Your skills: ${agent.skills.join(', ')}`
+      : 'You have no specific skills configured.';
+
+    const initialPrompt = `You are ${agent.name}. ${agent.instructions || ''}\n\n${skillsContext}`;
+
+    try {
+      const result = await window.electron?.startPty(
+        agentId,
+        savedSettings?.claudeWorkDir || undefined,
+        initialPrompt
+      );
+
+      if (result?.success) {
+        useTerminalStore.getState().registerAgentSession(agentId, agentId);
+        console.log('[AgentChat] PTY started for agent', agentId, 'with pid', result.pid);
+      } else {
+        console.error('[AgentChat] startPty failed:', result?.error);
+      }
+    } catch (err) {
+      console.error('[AgentChat] startPty exception:', err);
+    }
   };
 
   const handleSend = async () => {
-    if (!input.trim() || isProcessing || !activeAgent) return;
+    if (!input.trim() || !activeAgent) return;
 
+    // Capturar input ANTES de limpiar state — de lo contrario writePty recibe ''
+    const textToSend = input.trim();
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       type: 'user',
-      content: input,
+      content: textToSend,
       timestamp: new Date(),
       status: 'sent',
     };
 
-    // Add to messages
-    const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
     setInput('');
-    setIsProcessing(true);
 
-    // Update conversation
+    // Write to conversations only — messages is derived
     if (activeConversationId) {
       setConversations((prev) => ({
         ...prev,
         [activeConversationId]: {
           ...prev[activeConversationId],
-          messages: updatedMessages,
+          messages: [...(prev[activeConversationId]?.messages ?? []), userMessage],
           lastActivity: new Date(),
         },
       }));
     }
 
-    // Simulate agent response
-    setTypingAgents((prev) => new Set(prev).add(activeAgent.id));
+    // Write to the real PTY session
+    const sessionId = useTerminalStore.getState().getSessionIdByAgentId(activeAgent.id);
+    if (!sessionId) {
+      // No hay sesión PTY — notificar al usuario
+      console.error('[AgentChat] No PTY session found for agent:', activeAgent.id);
+      return;
+    }
 
-    setTimeout(() => {
-      setTypingAgents((prev) => {
-        const next = new Set(prev);
-        next.delete(activeAgent.id);
-        return next;
-      });
+    const skillsContext = activeAgent.skills.length > 0
+      ? `Your skills: ${activeAgent.skills.join(', ')}`
+      : 'You have no specific skills configured.';
+    const initialPrompt = `You are ${activeAgent.name}. ${activeAgent.instructions || ''}\n\n${skillsContext}`;
 
-      const agentResponse: ChatMessage = {
-        id: crypto.randomUUID(),
-        type: 'agent',
-        content: generateAgentResponse(input, activeAgent),
-        timestamp: new Date(),
-        agentId: activeAgent.id,
-        agentName: activeAgent.name,
-        status: 'sent',
-      };
-
-      const finalMessages = [...updatedMessages, agentResponse];
-      setMessages(finalMessages);
-      setIsProcessing(false);
-
-      if (activeConversationId) {
-        setConversations((prev) => ({
-          ...prev,
-          [activeConversationId]: {
-            ...prev[activeConversationId],
-            messages: finalMessages,
-            lastActivity: new Date(),
-          },
-        }));
-      }
-    }, 1500 + Math.random() * 1000);
+    try {
+      await window.electron?.writePty(sessionId, textToSend + '\n', initialPrompt);
+    } catch (err) {
+      console.error('[AgentChat] writePty failed:', err);
+    }
   };
 
   const generateAgentResponse = (userInput: string, agent: typeof activeAgent): string => {
@@ -167,14 +224,14 @@ export function AgentChat() {
 
     // Check for trabajo_terminado flag
     if (input.includes('trabajo_terminado=false')) {
-      if (activeAgentId) {
-        updateAgent(activeAgentId, { status: 'error', trabajoTerminado: false });
+      if (agent?.id) {
+        updateAgent(agent.id, { status: 'error', trabajoTerminado: false });
       }
       return `[${new Date().toLocaleTimeString()}] Estado actualizado: trabajo_terminado=false\nEl agente ${agent?.name} ha reportado un error en la tarea.`;
     }
     if (input.includes('trabajo_terminado=true')) {
-      if (activeAgentId) {
-        updateAgent(activeAgentId, { status: 'success', trabajoTerminado: true });
+      if (agent?.id) {
+        updateAgent(agent.id, { status: 'success', trabajoTerminado: true });
       }
       return `[${new Date().toLocaleTimeString()}] Estado actualizado: trabajo_terminado=true\nEl agente ${agent?.name} ha completado la tarea exitosamente.`;
     }
@@ -208,41 +265,29 @@ export function AgentChat() {
   };
 
   const handleSaveEdit = () => {
-    if (!editingMessageId || !editContent.trim()) return;
-
-    const updatedMessages = messages.map((m) =>
-      m.id === editingMessageId ? { ...m, content: editContent } : m
-    );
-    setMessages(updatedMessages);
-
-    if (activeConversationId) {
-      setConversations((prev) => ({
-        ...prev,
-        [activeConversationId]: {
-          ...prev[activeConversationId],
-          messages: updatedMessages,
-        },
-      }));
-    }
-
+    if (!editingMessageId || !editContent.trim() || !activeConversationId) return;
+    setConversations((prev) => ({
+      ...prev,
+      [activeConversationId]: {
+        ...prev[activeConversationId],
+        messages: prev[activeConversationId].messages.map((m) =>
+          m.id === editingMessageId ? { ...m, content: editContent } : m
+        ),
+      },
+    }));
     setEditingMessageId(null);
     setEditContent('');
   };
 
   const handleDeleteMessage = (messageId: string) => {
-    if (!confirm('¿Eliminar este mensaje?')) return;
-    const updatedMessages = messages.filter((m) => m.id !== messageId);
-    setMessages(updatedMessages);
-
-    if (activeConversationId) {
-      setConversations((prev) => ({
-        ...prev,
-        [activeConversationId]: {
-          ...prev[activeConversationId],
-          messages: updatedMessages,
-        },
-      }));
-    }
+    if (!confirm('¿Eliminar este mensaje?') || !activeConversationId) return;
+    setConversations((prev) => ({
+      ...prev,
+      [activeConversationId]: {
+        ...prev[activeConversationId],
+        messages: prev[activeConversationId].messages.filter((m) => m.id !== messageId),
+      },
+    }));
   };
 
   const formatTimestamp = (date: Date) => {
@@ -255,10 +300,6 @@ export function AgentChat() {
     if (minutes < 1440) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
-
-  const conversationsList = Object.values(conversations).sort(
-    (a, b) => b.lastActivity.getTime() - a.lastActivity.getTime()
-  );
 
   return (
     <div className="h-full flex bg-background">
@@ -273,6 +314,8 @@ export function AgentChat() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant" />
             <input
               type="text"
+              value={agentSearchQuery}
+              onChange={(e) => setAgentSearchQuery(e.target.value)}
               placeholder="Search agents..."
               className="w-full pl-9 pr-3 py-2 bg-surface-container rounded text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
@@ -286,7 +329,9 @@ export function AgentChat() {
               <p className="text-on-surface-variant text-sm">No agents connected</p>
             </div>
           ) : (
-            agentsList.map((agent) => {
+            agentsList.filter((a) =>
+              a.name.toLowerCase().includes(agentSearchQuery.toLowerCase())
+            ).map((agent) => {
               const conv = conversations[agent.id];
               const isActive = activeAgentId === agent.id;
               const isTyping = typingAgents.has(agent.id);
@@ -396,10 +441,18 @@ export function AgentChat() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button className="p-2 hover:bg-surface-container rounded transition-colors">
+                  <button
+                    onClick={() => window.alert('Llamada de voz no disponible en esta versión')}
+                    title="Función no disponible"
+                    className="p-2 hover:bg-surface-container rounded transition-colors opacity-50 cursor-not-allowed"
+                  >
                     <Phone className="w-4 h-4 text-on-surface-variant" />
                   </button>
-                  <button className="p-2 hover:bg-surface-container rounded transition-colors">
+                  <button
+                    onClick={() => window.alert('Videollamada no disponible en esta versión')}
+                    title="Función no disponible"
+                    className="p-2 hover:bg-surface-container rounded transition-colors opacity-50 cursor-not-allowed"
+                  >
                     <Video className="w-4 h-4 text-on-surface-variant" />
                   </button>
                   <button
@@ -414,7 +467,11 @@ export function AgentChat() {
                   >
                     <Activity className="w-4 h-4 text-on-surface-variant" />
                   </button>
-                  <button className="p-2 hover:bg-surface-container rounded transition-colors">
+                  <button
+                    onClick={() => setScreen('agents')}
+                    title="Configurar agente"
+                    className="p-2 hover:bg-surface-container rounded transition-colors"
+                  >
                     <Settings className="w-4 h-4 text-on-surface-variant" />
                   </button>
                 </div>

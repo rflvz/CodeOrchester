@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Plus, Search, Bot, Edit2, Trash2, MessageSquare, Activity, Settings } from 'lucide-react';
+import { Plus, Search, Bot, Edit2, Trash2, MessageSquare, Activity, Settings, AlertTriangle } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agentStore';
 import { useUIStore } from '../../../stores/uiStore';
+import { useNotificationStore } from '../../../stores/notificationStore';
 import { AgentAvatar } from '../../Shared/AgentAvatar';
 import { StatusChip } from '../../Shared/StatusChip';
 import { CreateAgentModal } from '../../Shared/CreateAgentModal';
@@ -9,9 +10,11 @@ import { CreateAgentModal } from '../../Shared/CreateAgentModal';
 export function AgentDashboard() {
   const { agents, deleteAgent, setActiveAgent } = useAgentStore();
   const { setScreen } = useUIStore();
+  const { addNotification } = useNotificationStore();
   const [showNewAgentModal, setShowNewAgentModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingAgent, setEditingAgent] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const agentsList = Object.values(agents);
   const filteredAgents = agentsList.filter((agent) =>
@@ -32,9 +35,20 @@ export function AgentDashboard() {
     setActiveAgent(agentId);
   };
 
-  const handleDeleteAgent = (agentId: string) => {
-    if (confirm('¿Eliminar este agente?')) {
-      deleteAgent(agentId);
+  const handleDeleteConfirm = () => {
+    if (!deleteConfirmId) return;
+    try {
+      deleteAgent(deleteConfirmId);
+    } catch (err) {
+      addNotification({
+        type: 'error',
+        title: 'Error al eliminar agente',
+        body: err instanceof Error ? err.message : 'No se pudo eliminar el agente',
+        agentId: deleteConfirmId,
+        taskId: null,
+      });
+    } finally {
+      setDeleteConfirmId(null);
     }
   };
 
@@ -207,7 +221,7 @@ export function AgentDashboard() {
                     <Edit2 className="w-3 h-3" />
                   </button>
                   <button
-                    onClick={() => handleDeleteAgent(agent.id)}
+                    onClick={() => setDeleteConfirmId(agent.id)}
                     className="p-2 bg-surface-container-low hover:bg-error/20 rounded text-xs text-on-surface-variant hover:text-error transition-colors"
                   >
                     <Trash2 className="w-3 h-3" />
@@ -219,14 +233,48 @@ export function AgentDashboard() {
         )}
       </div>
 
-      {/* New Agent Modal */}
+      {/* New / Edit Agent Modal */}
       <CreateAgentModal
         isOpen={showNewAgentModal || editingAgent !== null}
+        agentId={editingAgent ?? undefined}
         onClose={() => {
           setShowNewAgentModal(false);
           setEditingAgent(null);
         }}
       />
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDeleteConfirmId(null)} />
+          <div className="relative bg-surface-container rounded-lg p-6 max-w-sm w-full mx-4 shadow-2xl border border-error/20">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertTriangle className="w-5 h-5 text-error flex-shrink-0" />
+              <h3 className="font-headline font-bold text-on-surface uppercase tracking-wide">Eliminar Agente</h3>
+            </div>
+            <p className="text-sm text-on-surface-variant mb-1">
+              ¿Seguro que deseas eliminar al agente
+            </p>
+            <p className="text-sm font-bold text-on-surface font-mono mb-6">
+              {agents[deleteConfirmId]?.name ?? deleteConfirmId}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setDeleteConfirmId(null)}
+                className="px-4 py-2 text-sm text-on-surface-variant hover:text-on-surface border border-outline-variant/30 rounded transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                className="px-4 py-2 text-sm font-bold text-on-error bg-error rounded hover:bg-error/90 transition-colors"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

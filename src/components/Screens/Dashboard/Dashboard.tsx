@@ -1,77 +1,104 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Settings, Terminal, Bot } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agentStore';
 import { useUIStore } from '../../../stores/uiStore';
+import { useTerminalStore } from '../../../stores/terminalStore';
 import { StatusChip } from '../../Shared/StatusChip';
 import { AgentAvatar } from '../../Shared/AgentAvatar';
 import { CreateAgentModal } from '../../Shared/CreateAgentModal';
 
-interface ConsoleLog {
-  id: string;
-  message: string;
-  type: 'info' | 'debug' | 'alert' | 'success';
-  timestamp: string;
-}
-
-interface Activity {
-  id: string;
-  time: string;
-  message: string;
-  status: 'SUCCESS' | 'WARNING' | 'ERROR';
+interface SystemMetrics {
+  cpuPercent: number;
+  memoryMB: number;
+  memoryTotalMB: number;
 }
 
 export function Dashboard() {
   const { agents, setActiveAgent } = useAgentStore();
   const { setScreen } = useUIStore();
+  const { recentLogs } = useTerminalStore();
   const [showNewAgentModal, setShowNewAgentModal] = useState(false);
+  const [showAllActivities, setShowAllActivities] = useState(false);
+  const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
+  const [uptimeStart] = useState(() => Date.now());
+  const [uptime, setUptime] = useState(0);
 
   const agentsList = Object.values(agents);
+  const activeCount = agentsList.filter((a) => a.status === 'active').length;
+  const systemHealth = agentsList.length === 0
+    ? 100
+    : Math.round((agentsList.filter((a) => a.status !== 'error').length / agentsList.length) * 100);
 
-  const [consoleLogs] = useState<ConsoleLog[]>([
-    { id: '1', message: 'INFO: Dispatching task 0x9AF4 to agent CORE_ORCHESTRATOR', type: 'info', timestamp: '12:45:02' },
-    { id: '2', message: 'DEBUG: Memory allocation for sub-agent successful (1.2GB)', type: 'debug', timestamp: '12:45:03' },
-    { id: '3', message: 'SYSTEM: Node cluster 4 health verified', type: 'success', timestamp: '12:45:05' },
-    { id: '4', message: 'ALERT: High entropy detected in model inference stream', type: 'alert', timestamp: '12:45:10' },
-  ]);
+  // Poll system metrics every 5s
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      if (!window.electron) return;
+      const m = await window.electron.getSystemMetrics();
+      setMetrics(m);
+    };
+    fetchMetrics();
+    const interval = setInterval(fetchMetrics, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const [activities] = useState<Activity[]>([
-    { id: '1', time: '12:45:02', message: 'CORE_ORCHESTRATOR deployed Vision_Processor to node 7.', status: 'SUCCESS' },
-    { id: '2', time: '12:42:18', message: 'SYSTEM detected anomaly in API_LATENCY [452ms]. Auto-scaling initiated.', status: 'WARNING' },
-    { id: '3', time: '12:38:55', message: 'DATA_HARVESTER completed batch sync with [AWS_REGION_US_EAST].', status: 'SUCCESS' },
-    { id: '4', time: '12:35:10', message: 'CODE_EXPERT_V3 successfully refactored module auth_service.py.', status: 'SUCCESS' },
-  ]);
+  // Track uptime in hours
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setUptime(Math.floor((Date.now() - uptimeStart) / 3600000 * 100) / 100);
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [uptimeStart]);
 
-  const metrics = [
-    { label: 'CPU_LOAD', value: '42.8%', icon: '⚡' },
-    { label: 'MEMORY_USAGE', value: '12.4GB', icon: '💾' },
-    { label: 'API_LATENCY', value: '14MS', icon: '⚡' },
-    { label: 'UPTIME', value: '182HR', icon: '⏱️' },
+  const metricCards = [
+    {
+      label: 'CPU_LOAD',
+      value: metrics ? `${metrics.cpuPercent.toFixed(1)}%` : '—',
+      icon: '⚡',
+    },
+    {
+      label: 'MEMORY_USAGE',
+      value: metrics ? `${metrics.memoryMB}MB` : '—',
+      icon: '💾',
+    },
+    {
+      label: 'ACTIVE_AGENTS',
+      value: String(activeCount),
+      icon: '🤖',
+    },
+    {
+      label: 'UPTIME',
+      value: uptime < 1 ? '<1HR' : `${uptime.toFixed(1)}HR`,
+      icon: '⏱️',
+    },
   ];
 
-  const getLogColor = (type: ConsoleLog['type']) => {
-    switch (type) {
-      case 'alert': return 'text-error';
-      case 'debug': return 'text-on-surface-variant';
-      case 'info': return 'text-primary';
-      case 'success': return 'text-secondary';
-      default: return 'text-tertiary';
-    }
+  const getLogColor = (line: string) => {
+    if (line.includes('ERROR') || line.includes('ALERT') || line.includes('error')) return 'text-error';
+    if (line.includes('DEBUG') || line.includes('debug')) return 'text-on-surface-variant';
+    if (line.includes('SUCCESS') || line.includes('success')) return 'text-secondary';
+    return 'text-primary';
   };
+
+  const consoleLogs = recentLogs.slice(-20);
+
+  // Derive activities from agent status — show each agent's last known state
+  const activities = agentsList
+    .filter((a) => a.status !== 'idle')
+    .map((a) => ({
+      id: a.id,
+      time: new Date().toLocaleTimeString(),
+      message: `${a.name}: ${a.currentTask ?? 'status=' + a.status}`,
+      status: a.status === 'error' ? 'ERROR' as const
+        : a.status === 'active' || a.status === 'processing' ? 'WARNING' as const
+        : 'SUCCESS' as const,
+    }));
 
   return (
     <div className="h-full flex flex-col bg-background text-on-surface">
-      {/* Header */}
+      {/* Header — no duplicate nav buttons */}
       <header className="border-b border-outline-variant/15 px-6 py-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-8">
-            <h1 className="text-xl font-headline font-bold tracking-wide text-primary">CODEORCHESTRATOR</h1>
-            <nav className="flex gap-6 text-sm">
-              <button onClick={() => setScreen('dashboard')} className="text-on-surface hover:text-primary transition-colors">Dashboard</button>
-              <button onClick={() => setScreen('chat')} className="text-on-surface-variant hover:text-primary transition-colors">Chat</button>
-              <button onClick={() => setScreen('skills')} className="text-on-surface-variant hover:text-primary transition-colors">Skills</button>
-              <button onClick={() => setScreen('codemonitor')} className="text-on-surface-variant hover:text-primary transition-colors">Monitor</button>
-            </nav>
-          </div>
+          <h1 className="text-xl font-headline font-bold tracking-wide text-primary">CODEORCHESTRATOR</h1>
           <div className="flex items-center gap-4">
             <button
               onClick={() => setShowNewAgentModal(true)}
@@ -108,14 +135,14 @@ export function Dashboard() {
             <span className="text-lg font-headline font-bold text-on-surface">CODEORCHESTRATOR</span>
           </div>
           <div className="flex items-center gap-4 text-sm">
-            <span className="text-on-surface-variant">System_Health: <span className="text-secondary font-bold">98%</span></span>
-            <span className="text-on-surface-variant">Active_Agents: <span className="text-tertiary font-bold">{agentsList.filter(a => a.status === 'active').length}</span></span>
+            <span className="text-on-surface-variant">System_Health: <span className="text-secondary font-bold">{systemHealth}%</span></span>
+            <span className="text-on-surface-variant">Active_Agents: <span className="text-tertiary font-bold">{activeCount}</span></span>
           </div>
         </div>
 
         {/* Metrics Grid */}
         <div className="grid grid-cols-4 gap-4 mb-6">
-          {metrics.map((metric) => (
+          {metricCards.map((metric) => (
             <div key={metric.label} className="bg-surface-container p-4 rounded-md border border-outline-variant/15">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-on-surface-variant uppercase tracking-wider font-mono">{metric.label}</span>
@@ -160,14 +187,14 @@ export function Dashboard() {
                 </div>
                 <p className="text-sm text-on-surface-variant mb-4">{agent.description || 'Sin descripción'}</p>
                 <div className="flex items-center gap-4 text-sm">
-                  <span className="text-on-surface-variant">Sub_Agents: <span className="text-on-surface font-mono">04</span></span>
+                  <span className="text-on-surface-variant">Sub_Agents: <span className="text-on-surface font-mono">{String(agentsList.length).padStart(2, '0')}</span></span>
                   <span className="text-on-surface-variant">Thread_ID: <span className="text-on-surface font-mono">{agent.id.slice(0, 8).toUpperCase()}</span></span>
                 </div>
               </div>
             ))
           )}
 
-          {/* Live Console */}
+          {/* Live Console — streams from terminalStore */}
           <div className="bg-surface-container p-6 rounded-md border border-outline-variant/15">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-headline font-bold text-on-surface">LIVE_CONSOLE</h2>
@@ -177,39 +204,51 @@ export function Dashboard() {
               </span>
             </div>
             <div className="bg-surface-container-lowest p-4 rounded font-mono text-xs h-48 overflow-y-auto">
-              <p className="text-on-surface-variant mb-2">system@codeorchester:~$ tail -f /var/log/orchestrator.log</p>
-              {consoleLogs.map((log) => (
-                <p key={log.id} className={`mb-1 ${getLogColor(log.type)}`}>
-                  [{log.timestamp}] {log.message}
-                </p>
-              ))}
+              {consoleLogs.length === 0 ? (
+                <p className="text-on-surface-variant">system@codeorchester:~$ Esperando output de agentes...</p>
+              ) : (
+                consoleLogs.map((log, i) => (
+                  <p key={i} className={`mb-1 ${getLogColor(log.line)}`}>
+                    [{log.ts}] {log.line}
+                  </p>
+                ))
+              )}
             </div>
           </div>
         </div>
 
-        {/* Recent Activities */}
+        {/* Recent Activities — derived from agentStore state */}
         <div className="bg-surface-container p-6 rounded-md border border-outline-variant/15">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-headline font-bold text-on-surface">RECENT_ACTIVITIES</h2>
-            <button className="text-sm text-tertiary hover:underline">VIEW_FULL_LOG</button>
+            <button
+              onClick={() => setShowAllActivities((v) => !v)}
+              className="text-sm text-tertiary hover:underline"
+            >
+              {showAllActivities ? 'COLLAPSE_LOG' : 'VIEW_FULL_LOG'}
+            </button>
           </div>
-          <div className="space-y-2 text-sm">
-            {activities.map((activity) => (
-              <div key={activity.id} className="flex items-center gap-4 p-3 bg-surface-container-low rounded">
-                <span className="text-on-surface-variant font-mono text-xs">{activity.time}</span>
-                <span className="flex-1 text-on-surface">{activity.message}</span>
-                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                  activity.status === 'SUCCESS'
-                    ? 'bg-secondary/20 text-secondary'
-                    : activity.status === 'WARNING'
-                    ? 'bg-tertiary/20 text-tertiary'
-                    : 'bg-error/20 text-error'
-                }`}>
-                  {activity.status}
-                </span>
-              </div>
-            ))}
-          </div>
+          {activities.length === 0 ? (
+            <p className="text-on-surface-variant text-sm">Sin actividad reciente. Los cambios de estado de los agentes aparecerán aquí.</p>
+          ) : (
+            <div className="space-y-2 text-sm">
+              {(showAllActivities ? activities : activities.slice(0, 3)).map((activity) => (
+                <div key={activity.id} className="flex items-center gap-4 p-3 bg-surface-container-low rounded">
+                  <span className="text-on-surface-variant font-mono text-xs">{activity.time}</span>
+                  <span className="flex-1 text-on-surface">{activity.message}</span>
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                    activity.status === 'SUCCESS'
+                      ? 'bg-secondary/20 text-secondary'
+                      : activity.status === 'WARNING'
+                      ? 'bg-tertiary/20 text-tertiary'
+                      : 'bg-error/20 text-error'
+                  }`}>
+                    {activity.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

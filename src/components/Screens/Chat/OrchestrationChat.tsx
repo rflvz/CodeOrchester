@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Zap, Plus, Activity, Terminal, Users } from 'lucide-react';
 import { useUIStore } from '../../../stores/uiStore';
+import { useAgentStore } from '../../../stores/agentStore';
 import { CreateAgentModal } from '../../Shared/CreateAgentModal';
 
 interface ChatMessage {
@@ -12,11 +13,25 @@ interface ChatMessage {
 
 export function OrchestrationChat() {
   const { setScreen } = useUIStore();
+  const { agents } = useAgentStore();
+  const agentsList = Object.values(agents);
+  const activeAgentCount = agentsList.filter((a) => a.status === 'active').length;
+  const systemHealth = agentsList.length === 0
+    ? 100
+    : Math.round((agentsList.filter((a) => a.status !== 'error').length / agentsList.length) * 100);
+
+  const bootMessage = [
+    `// CODEORCHESTRATOR v1.0`,
+    `// Neural command interface initialized — ${new Date().toISOString()}`,
+    `// Agents registered: ${agentsList.length}`,
+    `// Ready for agent orchestration`,
+  ].join('\n');
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: '1',
       type: 'system',
-      content: '// CODEORCHESTRATOR v1.0\n// Neural command interface initialized\n// Ready for agent orchestration',
+      content: bootMessage,
       timestamp: new Date(),
     },
   ]);
@@ -120,13 +135,13 @@ export function OrchestrationChat() {
             <span className="text-xs text-on-surface-variant uppercase tracking-wider">
               Active Agents:
             </span>
-            <span className="text-xs font-bold text-primary">00</span>
+            <span className="text-xs font-bold text-primary">{String(activeAgentCount).padStart(2, '0')}</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-on-surface-variant uppercase tracking-wider">
               System Health:
             </span>
-            <span className="text-xs font-bold text-secondary">98%</span>
+            <span className="text-xs font-bold text-secondary">{systemHealth}%</span>
           </div>
         </div>
       </div>

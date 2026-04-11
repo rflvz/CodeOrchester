@@ -21,6 +21,8 @@ export function MainStage() {
         return <Topology />;
       case 'chat':
         return <AgentChat />;
+      case 'orchestration':
+        return <OrchestrationChat />;
       case 'agents':
         return <AgentDashboard />;
       case 'skills':

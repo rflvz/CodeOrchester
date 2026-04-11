@@ -1,0 +1,19 @@
+[package]
+name        = "pty-manager"
+version     = "0.1.0"
+edition     = "2021"
+description = "portable-pty based PTY session manager (replaces node-pty)"
+
+[dependencies]
+tokio      = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+tracing    = { workspace = true }
+thiserror  = { workspace = true }
+uuid       = { workspace = true }
+
+# Cross-platform PTY implementation (replaces node-pty)
+portable-pty = "0.8"
+
+[dev-dependencies]
+tokio = { workspace = true }
