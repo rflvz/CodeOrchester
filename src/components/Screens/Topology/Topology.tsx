@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { GitBranch, Users, Network, Plus, Settings, Activity, Zap, Trash2, X, ZoomIn, ZoomOut, Maximize2, Link2, Unlink, LayoutGrid, ArrowRight } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agentStore';
 import { useTeamStore } from '../../../stores/teamStore';
+import { useFreeConnectionStore } from '../../../stores/freeConnectionStore';
 import { useTerminalStore } from '../../../stores/terminalStore';
 import { Agent, Team } from '../../../types';
 import { AgentAvatar } from '../../Shared/AgentAvatar';
@@ -56,12 +57,19 @@ const getBezierPath = (x1: number, y1: number, x2: number, y2: number) => {
 export function Topology() {
   const { agents, setActiveAgent, activeAgentId, updateAgent } = useAgentStore();
   const { teams, createTeam, addConnection, removeConnection, addAgentToTeam, removeAgentFromTeam } = useTeamStore();
+  const { connections: freeConnections, addConnection: addFreeConnection } = useFreeConnectionStore();
 
   const agentsList = Object.values(agents);
   const teamsList = Object.values(teams);
 
   const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set());
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  // Ref mirrors selectedTeamId so the global window mouseup handler ([] deps) always reads the current value
+  const selectedTeamIdRef = useRef<string | null>(null);
+  const setSelectedTeamIdSync = (val: string | null) => {
+    selectedTeamIdRef.current = val;
+    setSelectedTeamId(val);
+  };
   const [hoveredAgent, setHoveredAgent] = useState<string | null>(null);
   const [nodePositions, setNodePositions] = useState<Record<string, NodePosition>>({});
   const [showNewClusterModal, setShowNewClusterModal] = useState(false);
@@ -69,14 +77,6 @@ export function Topology() {
   const [newClusterTopology, setNewClusterTopology] = useState<'hierarchical' | 'mesh' | 'star' | 'chain'>('mesh');
   const [showConnectionsPanel, setShowConnectionsPanel] = useState(false);
 
-  // BUG: localConnections is only stored in local React state — addConnection (imported above) is never called.
-  //      Connections drawn by the user are displayed but never persisted to teamStore, so they vanish on re-render/navigation.
-  // NOTE: teamStore now has persist middleware (connections survive restarts). However, localConnections
-  // in this component is still separate from teamStore.connections. A follow-up should sync them or
-  // migrate to using teamStore.connections directly in the UI.
-  // delegateToConnectedAgents (above) implements TODO #7 — use it when an agent finishes a task.
-  // Free-form connections between any agents (no cluster required)
-  const [localConnections, setLocalConnections] = useState<{ id: string; fromId: string; toId: string }[]>([]);
   // Connection currently being drawn by dragging
   const [connectionDraw, setConnectionDraw] = useState<{ fromId: string; toX: number; toY: number } | null>(null);
   // Ref mirrors connectionDraw state synchronously so event handlers always read the current value
@@ -120,6 +120,19 @@ export function Topology() {
       await window.electron?.writePty(sessionId, subtask + '\n');
     }
   }, [teams]);
+
+  // Routing: when an agent transitions to 'success', delegate its task to connected agents
+  const prevAgentsRef = useRef<typeof agents>({});
+  useEffect(() => {
+    const prev = prevAgentsRef.current;
+    Object.values(agents).forEach((agent) => {
+      const prevAgent = prev[agent.id];
+      if (prevAgent && prevAgent.status !== 'success' && agent.status === 'success' && agent.teamId) {
+        delegateToConnectedAgents(agent.id, agent.currentTask ?? '', agent.teamId);
+      }
+    });
+    prevAgentsRef.current = agents;
+  }, [agents, delegateToConnectedAgents]);
 
   // Initialize positions for agents
   useEffect(() => {
@@ -201,20 +214,20 @@ export function Topology() {
 
       const targetId = agentEl?.dataset.agentId;
       if (targetId && targetId !== draw.fromId) {
-        if (selectedTeamId) {
+        // Prefer the explicitly selected team; fall back to shared team from agent state
+        const teamId = selectedTeamIdRef.current ?? (() => {
+          const agentsState = useAgentStore.getState().agents;
+          const fromTeam = agentsState[draw.fromId]?.teamId;
+          const toTeam = agentsState[targetId]?.teamId;
+          return fromTeam && fromTeam === toTeam ? fromTeam : null;
+        })();
+
+        if (teamId) {
           // Persist to teamStore so the connection survives navigation
-          addConnection(selectedTeamId, { fromAgentId: draw.fromId, toAgentId: targetId });
+          addConnection(teamId, { fromAgentId: draw.fromId, toAgentId: targetId });
         } else {
-          // No team selected: fall back to local (in-memory) display
-          setLocalConnections((prev) => {
-            const exists = prev.some(
-              (c) =>
-                (c.fromId === draw.fromId && c.toId === targetId) ||
-                (c.fromId === targetId && c.toId === draw.fromId)
-            );
-            if (exists) return prev;
-            return [...prev, { id: crypto.randomUUID(), fromId: draw.fromId, toId: targetId }];
-          });
+          // Cross-team or teamless agents: persist via freeConnectionStore (localStorage)
+          addFreeConnection(draw.fromId, targetId);
         }
       }
       setConnectionDrawSync(null);
@@ -262,7 +275,7 @@ export function Topology() {
     setShowNewClusterModal(false);
     // Select the new cluster
     setSelectedNodes(new Set([newTeam.id]));
-    setSelectedTeamId(newTeam.id);
+    setSelectedTeamIdSync(newTeam.id);
   };
 
   const snapToGrid = (value: number) => Math.round(value / GRID_SIZE) * GRID_SIZE;
@@ -296,10 +309,10 @@ export function Topology() {
     // Set selected team if clicking on agent
     const agent = agentsList.find(a => a.id === nodeId);
     if (agent?.teamId) {
-      setSelectedTeamId(agent.teamId);
+      setSelectedTeamIdSync(agent.teamId);
     } else {
       const team = teamsList.find(t => t.id === nodeId);
-      if (team) setSelectedTeamId(team.id);
+      if (team) setSelectedTeamIdSync(team.id);
     }
   };
 
@@ -312,7 +325,7 @@ export function Topology() {
       setSelectedNodes(new Set([nodeId]));
       const agent = agentsList.find(a => a.id === nodeId);
       if (agent?.teamId) {
-        setSelectedTeamId(agent.teamId);
+        setSelectedTeamIdSync(agent.teamId);
       }
     }
   };
@@ -581,8 +594,8 @@ export function Topology() {
                 );
               })}
 
-              {/* Persisted team connections rendered on canvas */}
-              {selectedTeamConnections.map((conn) => {
+              {/* Persisted team connections rendered on canvas (all teams) */}
+              {teamsList.flatMap((t) => t.connections).map((conn) => {
                 const from = nodePositions[conn.fromAgentId];
                 const to = nodePositions[conn.toAgentId];
                 if (!from || !to) return null;
@@ -599,10 +612,10 @@ export function Topology() {
                 );
               })}
 
-              {/* Freeform agent-to-agent connections (no team selected — in-memory only) */}
-              {localConnections.map((conn) => {
-                const from = nodePositions[conn.fromId];
-                const to = nodePositions[conn.toId];
+              {/* Cross-team / teamless connections (persisted in freeConnectionStore via localStorage) */}
+              {freeConnections.map((conn) => {
+                const from = nodePositions[conn.fromAgentId];
+                const to = nodePositions[conn.toAgentId];
                 if (!from || !to) return null;
                 return (
                   <path
@@ -610,8 +623,7 @@ export function Topology() {
                     d={getBezierPath(from.x + NODE_WIDTH / 2, from.y, to.x - NODE_WIDTH / 2, to.y)}
                     stroke="#97a9ff"
                     strokeWidth="2.5"
-                    strokeOpacity="0.45"
-                    strokeDasharray="5 3"
+                    strokeOpacity="0.85"
                     fill="none"
                     markerEnd="url(#arrowhead)"
                   />
