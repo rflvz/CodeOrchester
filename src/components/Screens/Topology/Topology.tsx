@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { GitBranch, Users, Network, Plus, Settings, Activity, Zap, Trash2, X, ZoomIn, ZoomOut, Maximize2, Link2, Unlink, LayoutGrid, ArrowRight } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agentStore';
 import { useTeamStore } from '../../../stores/teamStore';
+import { useFreeConnectionStore } from '../../../stores/freeConnectionStore';
 import { useTerminalStore } from '../../../stores/terminalStore';
 import { Agent, Team } from '../../../types';
 import { AgentAvatar } from '../../Shared/AgentAvatar';
@@ -56,6 +57,7 @@ const getBezierPath = (x1: number, y1: number, x2: number, y2: number) => {
 export function Topology() {
   const { agents, setActiveAgent, activeAgentId, updateAgent } = useAgentStore();
   const { teams, createTeam, addConnection, removeConnection, addAgentToTeam, removeAgentFromTeam } = useTeamStore();
+  const { connections: freeConnections, addConnection: addFreeConnection } = useFreeConnectionStore();
 
   const agentsList = Object.values(agents);
   const teamsList = Object.values(teams);
@@ -75,8 +77,6 @@ export function Topology() {
   const [newClusterTopology, setNewClusterTopology] = useState<'hierarchical' | 'mesh' | 'star' | 'chain'>('mesh');
   const [showConnectionsPanel, setShowConnectionsPanel] = useState(false);
 
-  // Free-form connections between agents that share no team (in-memory only)
-  const [localConnections, setLocalConnections] = useState<{ id: string; fromId: string; toId: string }[]>([]);
   // Connection currently being drawn by dragging
   const [connectionDraw, setConnectionDraw] = useState<{ fromId: string; toX: number; toY: number } | null>(null);
   // Ref mirrors connectionDraw state synchronously so event handlers always read the current value
@@ -226,16 +226,8 @@ export function Topology() {
           // Persist to teamStore so the connection survives navigation
           addConnection(teamId, { fromAgentId: draw.fromId, toAgentId: targetId });
         } else {
-          // Cross-team or teamless agents: in-memory only
-          setLocalConnections((prev) => {
-            const exists = prev.some(
-              (c) =>
-                (c.fromId === draw.fromId && c.toId === targetId) ||
-                (c.fromId === targetId && c.toId === draw.fromId)
-            );
-            if (exists) return prev;
-            return [...prev, { id: crypto.randomUUID(), fromId: draw.fromId, toId: targetId }];
-          });
+          // Cross-team or teamless agents: persist via freeConnectionStore (localStorage)
+          addFreeConnection(draw.fromId, targetId);
         }
       }
       setConnectionDrawSync(null);
@@ -620,10 +612,10 @@ export function Topology() {
                 );
               })}
 
-              {/* Cross-team / teamless agent connections (in-memory, same visual style as team connections) */}
-              {localConnections.map((conn) => {
-                const from = nodePositions[conn.fromId];
-                const to = nodePositions[conn.toId];
+              {/* Cross-team / teamless connections (persisted in freeConnectionStore via localStorage) */}
+              {freeConnections.map((conn) => {
+                const from = nodePositions[conn.fromAgentId];
+                const to = nodePositions[conn.toAgentId];
                 if (!from || !to) return null;
                 return (
                   <path

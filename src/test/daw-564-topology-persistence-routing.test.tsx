@@ -12,10 +12,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Topology } from '../components/Screens/Topology/Topology';
 import { useAgentStore } from '../stores/agentStore';
 import { useTeamStore } from '../stores/teamStore';
+import { useFreeConnectionStore } from '../stores/freeConnectionStore';
 
 const resetStores = () => {
   useAgentStore.setState({ agents: {}, activeAgentId: null });
   useTeamStore.setState({ teams: {}, activeTeamId: null } as Parameters<typeof useTeamStore.setState>[0]);
+  useFreeConnectionStore.setState((s) => ({ ...s, connections: [] }));
 };
 
 const makeAgent = (name: string, teamId: string | null = null) =>

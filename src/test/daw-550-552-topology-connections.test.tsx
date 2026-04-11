@@ -11,12 +11,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Topology } from '../components/Screens/Topology/Topology';
 import { useAgentStore } from '../stores/agentStore';
 import { useTeamStore } from '../stores/teamStore';
+import { useFreeConnectionStore } from '../stores/freeConnectionStore';
 
 // Reset Zustand stores before each test
 const resetStores = () => {
   useAgentStore.setState({ agents: {}, activeAgentId: null });
-  // Reset teams to empty
   useTeamStore.setState({ teams: {} } as Parameters<typeof useTeamStore.setState>[0]);
+  useFreeConnectionStore.setState((s) => ({ ...s, connections: [] }));
 };
 
 describe('DAW-550 / DAW-552 – Topology agent connections', () => {
