@@ -39,11 +39,16 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 const path_1 = __importDefault(require("path"));
 const node_pty_1 = require("node-pty");
+const child_process_1 = require("child_process");
 const os_1 = __importDefault(require("os"));
 let mainWindow = null;
 const ptys = new Map();
-const conversationHistory = new Map();
-// Per-session agent identity (system prompt)
+// Agent sessions use child_process (clean pipes, no ANSI pollution from PTY)
+const agentProcs = new Map();
+// Per-session Claude CLI session UUIDs for --resume persistence
+// sessionId (PTY/agent) → claudeUUID (passed to --session-id / --resume)
+const claudeSessionIds = new Map();
+// Per-session agent identity (system prompt for first turn)
 const agentIdentity = new Map();
 // Per-session line buffer for NDJSON parsing (claude -p --output-format stream-json)
 const jsonLineBuffer = new Map();
@@ -164,7 +169,7 @@ electron_1.ipcMain.handle('start-pty', async (_event, sessionId, cwd, initialPro
         ptys.delete(sessionId);
     }
     jsonLineBuffer.delete(sessionId);
-    conversationHistory.delete(sessionId);
+    claudeSessionIds.delete(sessionId);
     const savedSettings = store?.get('settings') ?? defaultSettings;
     const resolvedClaCliPath = savedSettings.claudeCliPath?.trim() || '';
     const resolvedCwd = cwd?.trim() || savedSettings.claudeWorkDir?.trim() || os_1.default.homedir();
@@ -177,19 +182,16 @@ electron_1.ipcMain.handle('start-pty', async (_event, sessionId, cwd, initialPro
     const claudeCmd = resolvedClaCliPath || 'claude';
     const claudePath = useCmd ? 'cmd.exe' : claudeCmd;
     if (initialPrompt) {
-        // Agent session: store identity and initialize history; actual PTY spawned on first write-pty.
-        const history = [];
-        conversationHistory.set(sessionId, history);
+        // Agent session: store identity; actual PTY spawned on first write-pty.
         agentIdentity.set(sessionId, initialPrompt);
         jsonLineBuffer.set(sessionId, '');
-        // No PTY spawned here — write-pty handles that lazily
+        // claudeSessionIds not set yet — will be created on first write-pty
         return { success: true };
     }
     // No initialPrompt — interactive terminal for CodeMonitor (plain PTY)
     const args = useCmd ? ['/c', claudeCmd] : [claudeCmd];
     const pty = (0, node_pty_1.spawn)(claudePath, args, { cwd: resolvedCwd, env: ptyEnv });
     ptys.set(sessionId, pty);
-    conversationHistory.set(sessionId, []);
     jsonLineBuffer.set(sessionId, '');
     if (process.platform === 'win32') {
         await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -207,31 +209,37 @@ electron_1.ipcMain.handle('start-pty', async (_event, sessionId, cwd, initialPro
     pty.onExit(({ exitCode }) => {
         mainWindow?.webContents.send('pty-exit', { sessionId, exitCode });
         ptys.delete(sessionId);
-        conversationHistory.delete(sessionId);
         jsonLineBuffer.delete(sessionId);
     });
     return { success: true, pid: pty.pid };
 });
 electron_1.ipcMain.handle('write-pty', async (_event, sessionId, data, initialPrompt) => {
-    // Lazy initialization: if no PTY exists for this session, initialize the history
-    // and identity. This handles the race where handleSend fires before start-pty completes.
-    if (!conversationHistory.has(sessionId)) {
-        conversationHistory.set(sessionId, []);
+    // Lazy initialization: handle the race where handleSend fires before start-pty completes.
+    if (!jsonLineBuffer.has(sessionId)) {
         jsonLineBuffer.set(sessionId, '');
     }
     if (initialPrompt && !agentIdentity.has(sessionId)) {
         agentIdentity.set(sessionId, initialPrompt);
     }
-    // Kill any existing PTY process for this session before spawning new turn
-    const existing = ptys.get(sessionId);
-    if (existing) {
+    // Kill any existing agent child process for this session
+    const existingProc = agentProcs.get(sessionId);
+    if (existingProc) {
         try {
-            existing.kill();
+            existingProc.kill();
+        }
+        catch { /* ignore */ }
+        agentProcs.delete(sessionId);
+    }
+    // Also kill any legacy PTY for this session
+    const existingPty = ptys.get(sessionId);
+    if (existingPty) {
+        try {
+            existingPty.kill();
         }
         catch { /* ignore */ }
         ptys.delete(sessionId);
     }
-    jsonLineBuffer.delete(sessionId);
+    jsonLineBuffer.set(sessionId, '');
     const savedSettings = store?.get('settings') ?? defaultSettings;
     const resolvedClaCliPath = savedSettings.claudeCliPath?.trim() || '';
     const resolvedCwd = savedSettings.claudeWorkDir?.trim() || os_1.default.homedir();
@@ -240,28 +248,40 @@ electron_1.ipcMain.handle('write-pty', async (_event, sessionId, data, initialPr
         MINIMAX_API_KEY: savedSettings.minimaxApiKey || process.env.MINIMAX_API_KEY || '',
         MINIMAX_APP_ID: savedSettings.minimaxAppId || process.env.MINIMAX_APP_ID || '',
     };
-    const history = conversationHistory.get(sessionId);
-    const identity = agentIdentity.get(sessionId) ?? '';
-    // Build full prompt: agent identity (if first turn) + conversation history + new user message
-    const historyText = history.length > 0
-        ? '\n\nConversation so far:\n' + history.map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`).join('\n')
-        : '';
-    const firstTurnPrefix = history.length === 0 && identity ? identity + '\n\n' : '';
-    const fullPrompt = firstTurnPrefix + historyText + '\n\nUser: ' + data;
-    // Add user message to history
-    history.push({ role: 'user', content: data });
-    const useCmd = process.platform === 'win32';
+    // Sanitize identity: newlines/special chars break argument parsing
+    const identity = (agentIdentity.get(sessionId) ?? '').replace(/[\r\n]+/g, ' ').trim();
+    const existingClaudeSessionId = claudeSessionIds.get(sessionId);
     const claudeCmd = resolvedClaCliPath || 'claude';
-    const claudePath = useCmd ? 'cmd.exe' : claudeCmd;
-    const args = useCmd
-        ? ['/c', claudeCmd, '-p', '--verbose', '--output-format', 'stream-json', '--no-session-persistence', '--', fullPrompt]
-        : [claudeCmd, '-p', '--verbose', '--output-format', 'stream-json', '--no-session-persistence', '--', fullPrompt];
-    const pty = (0, node_pty_1.spawn)(claudePath, args, { cwd: resolvedCwd, env: ptyEnv });
-    ptys.set(sessionId, pty);
+    // Pass user message via stdin to avoid shell argument quoting issues on Windows
+    let cliArgs;
+    if (existingClaudeSessionId) {
+        cliArgs = ['-p', '--verbose', '--resume', existingClaudeSessionId,
+            '--output-format', 'stream-json', '--include-partial-messages'];
+    }
+    else {
+        const sessionUUID = crypto.randomUUID();
+        claudeSessionIds.set(sessionId, sessionUUID);
+        cliArgs = ['-p', '--verbose', '--session-id', sessionUUID,
+            '--system-prompt', identity,
+            '--output-format', 'stream-json', '--include-partial-messages'];
+    }
+    // Use child_process.spawn with shell:true (resolves .cmd on Windows) and piped stdio.
+    // User message sent via stdin — avoids all Windows shell argument quoting issues.
+    const proc = (0, child_process_1.spawn)(claudeCmd, cliArgs, {
+        cwd: resolvedCwd,
+        env: ptyEnv,
+        shell: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    // Write user message to stdin and close the pipe
+    proc.stdin?.write(data.trim() + '\n');
+    proc.stdin?.end();
+    agentProcs.set(sessionId, proc);
     jsonLineBuffer.set(sessionId, '');
-    pty.onData((data) => {
-        // Accumulate raw PTY output, parse NDJSON lines
-        const buffered = (jsonLineBuffer.get(sessionId) ?? '') + data;
+    let stderrOutput = '';
+    let receivedStreamingChunks = false;
+    const handleNdjsonChunk = (chunk) => {
+        const buffered = (jsonLineBuffer.get(sessionId) ?? '') + chunk.toString();
         jsonLineBuffer.set(sessionId, buffered);
         const lines = buffered.split(/\r?\n/);
         jsonLineBuffer.set(sessionId, lines.pop() ?? '');
@@ -270,18 +290,32 @@ electron_1.ipcMain.handle('write-pty', async (_event, sessionId, data, initialPr
                 continue;
             try {
                 const event = JSON.parse(line);
-                // Forward full event for raw JSON logging (on separate channel)
                 mainWindow?.webContents.send('claude-stream', { sessionId, event });
-                // Extract clean text and send via pty-data for display
-                if (event.type === 'result' && event.result !== undefined) {
-                    const result = event.result ?? '';
-                    history.push({ role: 'assistant', content: result });
-                    // Send each line of the result as a pty-data entry
-                    const textLines = result.split('\n').filter(l => l.trim());
-                    for (const tl of textLines) {
-                        mainWindow?.webContents.send('pty-data', { sessionId, data: tl });
+                if (event.type === 'error') {
+                    const errMsg = event.error?.message
+                        ?? event.message
+                        ?? 'Unknown error';
+                    stderrOutput += errMsg + '\n';
+                    mainWindow?.webContents.send('pty-error', { sessionId, message: errMsg });
+                }
+                // Streaming text chunks
+                if (event.type === 'content_block_delta') {
+                    const delta = event.delta;
+                    if (delta?.text) {
+                        receivedStreamingChunks = true;
+                        mainWindow?.webContents.send('pty-data', { sessionId, data: delta.text });
                     }
-                    // Parse trabajo_terminado
+                }
+                // Final result: always send as fallback if no streaming chunks arrived
+                if (event.type === 'result') {
+                    const resultSessionId = event.session_id;
+                    if (resultSessionId)
+                        claudeSessionIds.set(sessionId, resultSessionId);
+                    const result = event.result ?? '';
+                    // Use result text only if streaming didn't already deliver it
+                    if (!receivedStreamingChunks && result.trim()) {
+                        mainWindow?.webContents.send('pty-data', { sessionId, data: result });
+                    }
                     if (result.includes('trabajo_terminado=true')) {
                         mainWindow?.webContents.send('trabajo-terminado', { sessionId, value: true });
                     }
@@ -289,24 +323,24 @@ electron_1.ipcMain.handle('write-pty', async (_event, sessionId, data, initialPr
                         mainWindow?.webContents.send('trabajo-terminado', { sessionId, value: false });
                     }
                 }
-                // Also extract streaming text from content_block_delta if available
-                if (event.type === 'content_block_delta') {
-                    const delta = event.delta;
-                    if (delta?.text) {
-                        const textLines = delta.text.split('\n').filter(l => l.trim());
-                        for (const tl of textLines) {
-                            mainWindow?.webContents.send('pty-data', { sessionId, data: tl });
-                        }
-                    }
-                }
             }
-            catch { /* incomplete JSON — will be processed when more data arrives */ }
+            catch {
+                // Not JSON — plain-text error output
+                stderrOutput += line + '\n';
+            }
         }
-    });
-    pty.onExit(({ exitCode }) => {
+    };
+    proc.stdout?.on('data', handleNdjsonChunk);
+    proc.stderr?.on('data', (chunk) => { stderrOutput += chunk.toString(); });
+    proc.on('close', (exitCode) => {
         jsonLineBuffer.delete(sessionId);
-        mainWindow?.webContents.send('pty-exit', { sessionId, exitCode });
-        ptys.delete(sessionId);
+        agentProcs.delete(sessionId);
+        mainWindow?.webContents.send('pty-exit', { sessionId, exitCode: exitCode ?? 0 });
+        if (exitCode !== 0) {
+            claudeSessionIds.delete(sessionId);
+            const errMsg = stderrOutput.trim() || `Claude CLI exited with code ${exitCode}`;
+            mainWindow?.webContents.send('pty-error', { sessionId, message: errMsg });
+        }
     });
     return { success: true };
 });
@@ -319,15 +353,27 @@ electron_1.ipcMain.handle('resize-pty', async (_event, sessionId, cols, rows) =>
     return { success: false, error: 'Session not found' };
 });
 electron_1.ipcMain.handle('kill-pty', async (_event, sessionId) => {
+    const proc = agentProcs.get(sessionId);
+    if (proc) {
+        try {
+            proc.kill();
+        }
+        catch { /* ignore */ }
+        agentProcs.delete(sessionId);
+    }
     const pty = ptys.get(sessionId);
     if (pty) {
-        pty.kill();
+        try {
+            pty.kill();
+        }
+        catch { /* ignore */ }
         ptys.delete(sessionId);
-        conversationHistory.delete(sessionId);
-        agentIdentity.delete(sessionId);
-        jsonLineBuffer.delete(sessionId);
-        return { success: true };
     }
+    claudeSessionIds.delete(sessionId);
+    agentIdentity.delete(sessionId);
+    jsonLineBuffer.delete(sessionId);
+    if (proc || pty)
+        return { success: true };
     return { success: false, error: 'Session not found' };
 });
 electron_1.ipcMain.handle('show-notification', async (_event, title, body) => {

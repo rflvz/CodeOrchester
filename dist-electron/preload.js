@@ -42,6 +42,11 @@ const api = {
         electron_1.ipcRenderer.on('claude-stream', listener);
         return () => electron_1.ipcRenderer.removeListener('claude-stream', listener);
     },
+    onPtyError: (callback) => {
+        const listener = (_, data) => callback(data);
+        electron_1.ipcRenderer.on('pty-error', listener);
+        return () => electron_1.ipcRenderer.removeListener('pty-error', listener);
+    },
     getSettings: () => electron_1.ipcRenderer.invoke('get-settings'),
     setSettings: (updates) => electron_1.ipcRenderer.invoke('set-settings', updates),
     getAgentState: () => electron_1.ipcRenderer.invoke('get-agent-state'),

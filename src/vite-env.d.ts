@@ -19,6 +19,7 @@ declare global {
       windowIsMaximized: () => Promise<boolean>;
       onWindowMaximized: (callback: (maximized: boolean) => void) => () => void;
       onClaudeStream: (callback: (data: { sessionId: string; event: Record<string, unknown> }) => void) => () => void;
+      onPtyError: (callback: (data: { sessionId: string; message: string }) => void) => () => void;
       getSettings: () => Promise<Record<string, unknown>>;
       setSettings: (updates: Record<string, unknown>) => Promise<{ success: boolean }>;
       getAgentState: () => Promise<Record<string, unknown>>;
