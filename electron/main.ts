@@ -1,10 +1,13 @@
 import { app, BrowserWindow, ipcMain, Notification, shell } from 'electron';
 import path from 'path';
 import { spawn, IPty } from 'node-pty';
+import { spawn as cpSpawn, ChildProcess } from 'child_process';
 import os from 'os';
 
 let mainWindow: BrowserWindow | null = null;
 const ptys: Map<string, IPty> = new Map();
+// Agent sessions use child_process (clean pipes, no ANSI pollution from PTY)
+const agentProcs: Map<string, ChildProcess> = new Map();
 
 // Per-session Claude CLI session UUIDs for --resume persistence
 // sessionId (PTY/agent) → claudeUUID (passed to --session-id / --resume)
@@ -222,10 +225,16 @@ ipcMain.handle('write-pty', async (_event, sessionId: string, data: string, init
     agentIdentity.set(sessionId, initialPrompt);
   }
 
-  // Kill any existing PTY process for this session before spawning new turn
-  const existing = ptys.get(sessionId);
-  if (existing) {
-    try { existing.kill(); } catch { /* ignore */ }
+  // Kill any existing agent child process for this session
+  const existingProc = agentProcs.get(sessionId);
+  if (existingProc) {
+    try { existingProc.kill(); } catch { /* ignore */ }
+    agentProcs.delete(sessionId);
+  }
+  // Also kill any legacy PTY for this session
+  const existingPty = ptys.get(sessionId);
+  if (existingPty) {
+    try { existingPty.kill(); } catch { /* ignore */ }
     ptys.delete(sessionId);
   }
   jsonLineBuffer.set(sessionId, '');
@@ -234,49 +243,51 @@ ipcMain.handle('write-pty', async (_event, sessionId: string, data: string, init
   const resolvedClaCliPath = savedSettings.claudeCliPath?.trim() || '';
   const resolvedCwd = savedSettings.claudeWorkDir?.trim() || os.homedir();
 
-  const ptyEnv: Record<string, string> = {
+  const ptyEnv: NodeJS.ProcessEnv = {
     ...process.env,
     MINIMAX_API_KEY: savedSettings.minimaxApiKey || process.env.MINIMAX_API_KEY || '',
     MINIMAX_APP_ID: savedSettings.minimaxAppId || process.env.MINIMAX_APP_ID || '',
   };
 
-  const identity = agentIdentity.get(sessionId) ?? '';
+  // Sanitize identity: newlines/special chars break argument parsing
+  const identity = (agentIdentity.get(sessionId) ?? '').replace(/[\r\n]+/g, ' ').trim();
   const existingClaudeSessionId = claudeSessionIds.get(sessionId);
 
-  const useCmd = process.platform === 'win32';
   const claudeCmd = resolvedClaCliPath || 'claude';
-  const claudePath = useCmd ? 'cmd.exe' : claudeCmd;
 
-  let args: string[];
+  // Pass user message via stdin to avoid shell argument quoting issues on Windows
+  let cliArgs: string[];
   if (existingClaudeSessionId) {
-    // Subsequent turns: use --resume to continue the existing Claude CLI session
-    args = useCmd
-      ? ['/c', claudeCmd, '-p', '--resume', existingClaudeSessionId,
-         '--output-format', 'stream-json', '--include-partial-messages', '--', data.trim()]
-      : [claudeCmd, '-p', '--resume', existingClaudeSessionId,
-         '--output-format', 'stream-json', '--include-partial-messages', '--', data.trim()];
+    cliArgs = ['-p', '--verbose', '--resume', existingClaudeSessionId,
+               '--output-format', 'stream-json', '--include-partial-messages'];
   } else {
-    // First turn: create a new Claude CLI session with --session-id and --system-prompt
     const sessionUUID = crypto.randomUUID();
     claudeSessionIds.set(sessionId, sessionUUID);
-    args = useCmd
-      ? ['/c', claudeCmd, '-p', '--session-id', sessionUUID,
-         '--system-prompt', identity,
-         '--output-format', 'stream-json', '--include-partial-messages', '--', data.trim()]
-      : [claudeCmd, '-p', '--session-id', sessionUUID,
-         '--system-prompt', identity,
-         '--output-format', 'stream-json', '--include-partial-messages', '--', data.trim()];
+    cliArgs = ['-p', '--verbose', '--session-id', sessionUUID,
+               '--system-prompt', identity,
+               '--output-format', 'stream-json', '--include-partial-messages'];
   }
 
-  const pty = spawn(claudePath, args, { cwd: resolvedCwd, env: ptyEnv });
-  ptys.set(sessionId, pty);
+  // Use child_process.spawn with shell:true (resolves .cmd on Windows) and piped stdio.
+  // User message sent via stdin — avoids all Windows shell argument quoting issues.
+  const proc = cpSpawn(claudeCmd, cliArgs, {
+    cwd: resolvedCwd,
+    env: ptyEnv,
+    shell: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  // Write user message to stdin and close the pipe
+  proc.stdin?.write(data.trim() + '\n');
+  proc.stdin?.end();
+  agentProcs.set(sessionId, proc);
   jsonLineBuffer.set(sessionId, '');
 
   let stderrOutput = '';
+  let receivedStreamingChunks = false;
 
-  pty.onData((rawData: string) => {
-    // Accumulate raw PTY output, parse NDJSON lines
-    const buffered = (jsonLineBuffer.get(sessionId) ?? '') + rawData;
+  const handleNdjsonChunk = (chunk: Buffer | string) => {
+    const buffered = (jsonLineBuffer.get(sessionId) ?? '') + chunk.toString();
     jsonLineBuffer.set(sessionId, buffered);
     const lines = buffered.split(/\r?\n/);
     jsonLineBuffer.set(sessionId, lines.pop() ?? '');
@@ -285,10 +296,8 @@ ipcMain.handle('write-pty', async (_event, sessionId: string, data: string, init
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line);
-        // Forward full event for raw JSON logging (on separate channel)
         mainWindow?.webContents.send('claude-stream', { sessionId, event });
 
-        // Handle error events from Claude CLI
         if (event.type === 'error') {
           const errMsg = (event as { error?: { message?: string } }).error?.message
             ?? (event as { message?: string }).message
@@ -297,66 +306,47 @@ ipcMain.handle('write-pty', async (_event, sessionId: string, data: string, init
           mainWindow?.webContents.send('pty-error', { sessionId, message: errMsg });
         }
 
-        // Extract streaming text from content_block_delta (partial messages)
+        // Streaming text chunks
         if (event.type === 'content_block_delta') {
           const delta = (event as { delta?: { type?: string; text?: string } }).delta;
           if (delta?.text) {
-            const textLines = delta.text.split('\n').filter(l => l.trim());
-            for (const tl of textLines) {
-              mainWindow?.webContents.send('pty-data', { sessionId, data: tl });
-            }
+            receivedStreamingChunks = true;
+            mainWindow?.webContents.send('pty-data', { sessionId, data: delta.text });
           }
         }
 
-        // Handle assistant message events (streaming partial messages)
-        if (event.type === 'assistant') {
-          const content = (event as { message?: { content?: { type?: string; text?: string }[] } }).message?.content;
-          if (Array.isArray(content)) {
-            for (const block of content) {
-              if (block.type === 'text' && block.text) {
-                const textLines = block.text.split('\n').filter((l: string) => l.trim());
-                for (const tl of textLines) {
-                  mainWindow?.webContents.send('pty-data', { sessionId, data: tl });
-                }
-              }
-            }
-          }
-        }
-
-        // Extract clean text from the final result event
-        if (event.type === 'result' && (event as { result?: string }).result !== undefined) {
-          const result = (event as { result?: string }).result ?? '';
-
-          // Update claudeSessionIds if the result carries a session_id
+        // Final result: always send as fallback if no streaming chunks arrived
+        if (event.type === 'result') {
           const resultSessionId = (event as { session_id?: string }).session_id;
-          if (resultSessionId) {
-            claudeSessionIds.set(sessionId, resultSessionId);
+          if (resultSessionId) claudeSessionIds.set(sessionId, resultSessionId);
+
+          const result = (event as { result?: string }).result ?? '';
+          // Use result text only if streaming didn't already deliver it
+          if (!receivedStreamingChunks && result.trim()) {
+            mainWindow?.webContents.send('pty-data', { sessionId, data: result });
           }
 
-          // Send each line of the result as pty-data
-          const textLines = result.split('\n').filter(l => l.trim());
-          for (const tl of textLines) {
-            mainWindow?.webContents.send('pty-data', { sessionId, data: tl });
-          }
-
-          // Parse trabajo_terminado
           if (result.includes('trabajo_terminado=true')) {
             mainWindow?.webContents.send('trabajo-terminado', { sessionId, value: true });
           } else if (result.includes('trabajo_terminado=false')) {
             mainWindow?.webContents.send('trabajo-terminado', { sessionId, value: false });
           }
         }
-      } catch { /* incomplete JSON — will be processed when more data arrives */ }
+      } catch {
+        // Not JSON — plain-text error output
+        stderrOutput += line + '\n';
+      }
     }
-  });
+  };
 
-  pty.onExit(({ exitCode }) => {
+  proc.stdout?.on('data', handleNdjsonChunk);
+  proc.stderr?.on('data', (chunk: Buffer) => { stderrOutput += chunk.toString(); });
+
+  proc.on('close', (exitCode) => {
     jsonLineBuffer.delete(sessionId);
-    mainWindow?.webContents.send('pty-exit', { sessionId, exitCode });
-    ptys.delete(sessionId);
+    agentProcs.delete(sessionId);
+    mainWindow?.webContents.send('pty-exit', { sessionId, exitCode: exitCode ?? 0 });
 
-    // On non-zero exit, clear the Claude session ID so next turn starts fresh,
-    // and notify the renderer about the failure.
     if (exitCode !== 0) {
       claudeSessionIds.delete(sessionId);
       const errMsg = stderrOutput.trim() || `Claude CLI exited with code ${exitCode}`;
@@ -377,15 +367,20 @@ ipcMain.handle('resize-pty', async (_event, sessionId: string, cols: number, row
 });
 
 ipcMain.handle('kill-pty', async (_event, sessionId: string) => {
+  const proc = agentProcs.get(sessionId);
+  if (proc) {
+    try { proc.kill(); } catch { /* ignore */ }
+    agentProcs.delete(sessionId);
+  }
   const pty = ptys.get(sessionId);
   if (pty) {
-    pty.kill();
+    try { pty.kill(); } catch { /* ignore */ }
     ptys.delete(sessionId);
-    claudeSessionIds.delete(sessionId);
-    agentIdentity.delete(sessionId);
-    jsonLineBuffer.delete(sessionId);
-    return { success: true };
   }
+  claudeSessionIds.delete(sessionId);
+  agentIdentity.delete(sessionId);
+  jsonLineBuffer.delete(sessionId);
+  if (proc || pty) return { success: true };
   return { success: false, error: 'Session not found' };
 });
 

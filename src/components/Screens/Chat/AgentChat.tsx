@@ -60,9 +60,11 @@ export function AgentChat() {
   // Ref para trackear cuántos logs del session activo ya se mostraron
   const processedCountRef = useRef(0);
 
-  // Resetear contador de logs cuando cambia el agente activo
+  // Resetear estado al cambiar de agente
   useEffect(() => {
     processedCountRef.current = 0;
+    setIsProcessing(false);
+    setTypingAgents(new Set());
   }, [activeAgentId]);
 
   const recentLogs = useTerminalStore((state) => state.recentLogs);
