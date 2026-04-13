@@ -41,6 +41,7 @@ const path_1 = __importDefault(require("path"));
 const node_pty_1 = require("node-pty");
 const child_process_1 = require("child_process");
 const os_1 = __importDefault(require("os"));
+const schemas_1 = require("./schemas");
 let mainWindow = null;
 const ptys = new Map();
 // Agent sessions use child_process (clean pipes, no ANSI pollution from PTY)
@@ -67,6 +68,10 @@ const defaultSettings = {
 };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let store = null;
+// Per-session write-pty serialization: chains Promises so concurrent writes are
+// queued rather than killing each other. Eliminates the race condition between
+// consecutive write-pty calls for the same session.
+const writePtyQueue = new Map();
 async function initStore() {
     const { default: Store } = await Promise.resolve().then(() => __importStar(require('electron-store')));
     store = new Store({ defaults: { settings: defaultSettings, agents: {} } });
@@ -131,15 +136,37 @@ electron_1.ipcMain.handle('get-settings', () => {
     return { ...defaultSettings, ...saved };
 });
 electron_1.ipcMain.handle('set-settings', (_event, updates) => {
+    const result = schemas_1.AppSettingsSchema.safeParse(updates);
+    if (!result.success) {
+        return { success: false, error: `Invalid settings: ${result.error.message}` };
+    }
     const current = store?.get('settings') ?? defaultSettings;
-    store?.set('settings', { ...current, ...updates });
+    store?.set('settings', { ...current, ...result.data });
     return { success: true };
 });
 electron_1.ipcMain.handle('get-agent-state', () => {
     return store?.get('agents') ?? {};
 });
 electron_1.ipcMain.handle('set-agent-state', (_event, agents) => {
-    store?.set('agents', agents);
+    const result = schemas_1.AgentStateSchema.safeParse(agents);
+    if (!result.success) {
+        return { success: false, error: `Invalid agent state: ${result.error.message}` };
+    }
+    store?.set('agents', result.data);
+    return { success: true };
+});
+// Generic key-value store for renderer stores that need Electron-side persistence
+// (e.g. notificationStore, skillStore). Keys are namespaced by the caller.
+electron_1.ipcMain.handle('get-store-value', (_event, key) => {
+    if (typeof key !== 'string' || !key)
+        return null;
+    return store?.get(key) ?? null;
+});
+electron_1.ipcMain.handle('set-store-value', (_event, key, value) => {
+    if (typeof key !== 'string' || !key) {
+        return { success: false, error: 'Invalid key' };
+    }
+    store?.set(key, value);
     return { success: true };
 });
 electron_1.ipcMain.handle('get-system-metrics', () => {
@@ -214,6 +241,15 @@ electron_1.ipcMain.handle('start-pty', async (_event, sessionId, cwd, initialPro
     return { success: true, pid: pty.pid };
 });
 electron_1.ipcMain.handle('write-pty', async (_event, sessionId, data, initialPrompt) => {
+    // Serialize concurrent write-pty calls for the same session by chaining onto a
+    // per-session Promise. This eliminates the race condition where a second call kills
+    // the first process mid-execution.
+    const prev = writePtyQueue.get(sessionId) ?? Promise.resolve();
+    const current = prev.then(() => _writePtyImpl(sessionId, data, initialPrompt));
+    writePtyQueue.set(sessionId, current.catch(() => { }));
+    return current;
+});
+async function _writePtyImpl(sessionId, data, initialPrompt) {
     // Lazy initialization: handle the race where handleSend fires before start-pty completes.
     if (!jsonLineBuffer.has(sessionId)) {
         jsonLineBuffer.set(sessionId, '');
@@ -335,7 +371,8 @@ electron_1.ipcMain.handle('write-pty', async (_event, sessionId, data, initialPr
     proc.on('close', (exitCode) => {
         jsonLineBuffer.delete(sessionId);
         agentProcs.delete(sessionId);
-        mainWindow?.webContents.send('pty-exit', { sessionId, exitCode: exitCode ?? 0 });
+        // Don't send pty-exit here: agent sessions are multi-turn and the session
+        // remains active across turns. pty-exit for agent sessions is sent by kill-pty.
         if (exitCode !== 0) {
             claudeSessionIds.delete(sessionId);
             const errMsg = stderrOutput.trim() || `Claude CLI exited with code ${exitCode}`;
@@ -343,7 +380,7 @@ electron_1.ipcMain.handle('write-pty', async (_event, sessionId, data, initialPr
         }
     });
     return { success: true };
-});
+}
 electron_1.ipcMain.handle('resize-pty', async (_event, sessionId, cols, rows) => {
     const pty = ptys.get(sessionId);
     if (pty) {
@@ -360,6 +397,9 @@ electron_1.ipcMain.handle('kill-pty', async (_event, sessionId) => {
         }
         catch { /* ignore */ }
         agentProcs.delete(sessionId);
+        // Agent sessions don't send pty-exit from proc.on('close') (multi-turn design),
+        // so we send it explicitly here on intentional kill.
+        mainWindow?.webContents.send('pty-exit', { sessionId, exitCode: -1 });
     }
     const pty = ptys.get(sessionId);
     if (pty) {
@@ -368,6 +408,7 @@ electron_1.ipcMain.handle('kill-pty', async (_event, sessionId) => {
         }
         catch { /* ignore */ }
         ptys.delete(sessionId);
+        // PTY sessions fire pty-exit via pty.onExit; no need to send again.
     }
     claudeSessionIds.delete(sessionId);
     agentIdentity.delete(sessionId);
@@ -403,4 +444,13 @@ electron_1.ipcMain.handle('window-close', () => {
 });
 electron_1.ipcMain.handle('window-is-maximized', () => {
     return mainWindow?.isMaximized() ?? false;
+});
+electron_1.ipcMain.handle('show-directory-dialog', async () => {
+    if (!mainWindow)
+        return null;
+    const result = await electron_1.dialog.showOpenDialog(mainWindow, {
+        properties: ['openDirectory'],
+        title: 'Seleccionar directorio de trabajo',
+    });
+    return result.canceled ? null : result.filePaths[0] ?? null;
 });

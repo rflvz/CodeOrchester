@@ -51,6 +51,9 @@ const api = {
     setSettings: (updates) => electron_1.ipcRenderer.invoke('set-settings', updates),
     getAgentState: () => electron_1.ipcRenderer.invoke('get-agent-state'),
     setAgentState: (agents) => electron_1.ipcRenderer.invoke('set-agent-state', agents),
+    getStoreValue: (key) => electron_1.ipcRenderer.invoke('get-store-value', key),
+    setStoreValue: (key, value) => electron_1.ipcRenderer.invoke('set-store-value', key, value),
     getSystemMetrics: () => electron_1.ipcRenderer.invoke('get-system-metrics'),
+    showDirectoryDialog: () => electron_1.ipcRenderer.invoke('show-directory-dialog'),
 };
 electron_1.contextBridge.exposeInMainWorld('electron', api);

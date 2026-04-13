@@ -12,6 +12,12 @@ export interface Agent {
   icon?: string;
   instructions?: string;
   inactivityTimeout?: number; // minutes before marking agent as error, default 5
+  model?: 'haiku' | 'sonnet' | 'opus';
+  temperature?: number; // 0.0 - 1.0
+  maxTokens?: number;
+  cwd?: string;
+  envVars?: Record<string, string>;
+  autoStart?: boolean;
   createdAt: Date;
 }
 

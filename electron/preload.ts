@@ -45,6 +45,7 @@ export interface ElectronAPI {
   getStoreValue: (key: string) => Promise<unknown>;
   setStoreValue: (key: string, value: unknown) => Promise<{ success: boolean; error?: string }>;
   getSystemMetrics: () => Promise<SystemMetrics>;
+  showDirectoryDialog: () => Promise<string | null>;
 }
 
 const api: ElectronAPI = {
@@ -100,6 +101,7 @@ const api: ElectronAPI = {
   getStoreValue: (key) => ipcRenderer.invoke('get-store-value', key),
   setStoreValue: (key, value) => ipcRenderer.invoke('set-store-value', key, value),
   getSystemMetrics: () => ipcRenderer.invoke('get-system-metrics'),
+  showDirectoryDialog: () => ipcRenderer.invoke('show-directory-dialog'),
 };
 
 contextBridge.exposeInMainWorld('electron', api);

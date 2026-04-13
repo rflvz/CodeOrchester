@@ -25,6 +25,7 @@ declare global {
       getAgentState: () => Promise<Record<string, unknown>>;
       setAgentState: (agents: Record<string, unknown>) => Promise<{ success: boolean }>;
       getSystemMetrics: () => Promise<{ cpuPercent: number; memoryMB: number; memoryTotalMB: number }>;
+      showDirectoryDialog: () => Promise<string | null>;
     };
   }
 }
