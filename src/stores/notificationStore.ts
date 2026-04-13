@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Notification } from '../types';
+import { createElectronStorage } from './electronStorage';
 
 interface NotificationStore {
   notifications: Notification[];
@@ -56,7 +57,7 @@ export const useNotificationStore = create<NotificationStore>()(
     }),
     {
       name: 'notification-store',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => createElectronStorage('notification-store')),
       partialize: (state) => ({ notifications: state.notifications }),
       onRehydrateStorage: () => (state) => {
         if (state) {
