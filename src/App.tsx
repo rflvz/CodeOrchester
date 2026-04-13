@@ -1,4 +1,4 @@
-import { useEffect, Component, ReactNode } from 'react';
+import { useEffect, useRef, Component, ReactNode } from 'react';
 import { Sidebar } from './components/Layout/Sidebar';
 import { MainStage } from './components/Layout/MainStage';
 import { PanelArea } from './components/Layout/PanelArea';
@@ -41,19 +41,53 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
 function App() {
   const { rightPanelOpen } = useUIStore();
   const { pushLogs } = useTerminalStore();
-  const { setTrabajoTerminado } = useAgentStore();
+  const { setTrabajoTerminado, setAgentStatus, updateAgent } = useAgentStore();
+
+  // Map<agentId, timeoutHandle> — tracks per-agent inactivity timers
+  const heartbeatTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     const el = window.electron;
     if (!el) return;
 
+    const resetHeartbeat = (agentId: string) => {
+      const existing = heartbeatTimers.current.get(agentId);
+      if (existing) clearTimeout(existing);
+      const agent = useAgentStore.getState().agents[agentId];
+      if (!agent) return;
+      const timeoutMs = (agent.inactivityTimeout ?? 5) * 60 * 1000;
+      const timer = setTimeout(() => {
+        setAgentStatus(agentId, 'error');
+        updateAgent(agentId, { currentTask: 'Timeout: sin actividad' });
+        heartbeatTimers.current.delete(agentId);
+      }, timeoutMs);
+      heartbeatTimers.current.set(agentId, timer);
+    };
+
+    const cancelHeartbeat = (agentId: string) => {
+      const existing = heartbeatTimers.current.get(agentId);
+      if (existing) clearTimeout(existing);
+      heartbeatTimers.current.delete(agentId);
+    };
+
     const removePtyData = el.onPtyData(({ sessionId, data }) => {
       pushLogs(sessionId, data);
+      // Reset inactivity timer for the agent owning this session
+      const { agentSessionMap } = useTerminalStore.getState();
+      const agentId = Object.keys(agentSessionMap).find((aid) => agentSessionMap[aid] === sessionId);
+      if (agentId) {
+        const agent = useAgentStore.getState().agents[agentId];
+        if (agent && (agent.status === 'active' || agent.status === 'processing')) {
+          resetHeartbeat(agentId);
+        }
+      }
     });
 
     const removeTrabajoTerminado = el.onTrabajoTerminado(({ sessionId, value }) => {
       const { agentSessionMap } = useTerminalStore.getState();
-      const agentId = agentSessionMap[sessionId] ?? sessionId;
+      // agentSessionMap is agentId→sessionId; reverse-lookup to find agentId from sessionId
+      const agentId = Object.keys(agentSessionMap).find((aid) => agentSessionMap[aid] === sessionId) ?? sessionId;
+      cancelHeartbeat(agentId);
       setTrabajoTerminado(agentId, value);
     });
 
@@ -75,6 +109,7 @@ function App() {
         (aid) => agentSessionMap[aid] === sessionId
       );
       if (agentId) {
+        cancelHeartbeat(agentId);
         useTerminalStore.getState().unregisterAgentSession(agentId);
       }
     });
@@ -85,8 +120,11 @@ function App() {
       removeClaudeStream();
       removePtyError();
       removePtyExit();
+      // Clear all pending heartbeat timers on unmount
+      heartbeatTimers.current.forEach((timer) => clearTimeout(timer));
+      heartbeatTimers.current.clear();
     };
-  }, [pushLogs, setTrabajoTerminado]);
+  }, [pushLogs, setTrabajoTerminado, setAgentStatus, updateAgent]);
 
   return (
     <ErrorBoundary>
