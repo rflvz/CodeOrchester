@@ -39,9 +39,11 @@ export interface ElectronAPI {
   onClaudeStream: (callback: (data: { sessionId: string; event: Record<string, unknown> }) => void) => () => void;
   onPtyError: (callback: (data: { sessionId: string; message: string }) => void) => () => void;
   getSettings: () => Promise<AppSettings>;
-  setSettings: (updates: Partial<AppSettings>) => Promise<{ success: boolean }>;
+  setSettings: (updates: Partial<AppSettings>) => Promise<{ success: boolean; error?: string }>;
   getAgentState: () => Promise<Record<string, unknown>>;
-  setAgentState: (agents: Record<string, unknown>) => Promise<{ success: boolean }>;
+  setAgentState: (agents: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>;
+  getStoreValue: (key: string) => Promise<unknown>;
+  setStoreValue: (key: string, value: unknown) => Promise<{ success: boolean; error?: string }>;
   getSystemMetrics: () => Promise<SystemMetrics>;
 }
 
@@ -95,6 +97,8 @@ const api: ElectronAPI = {
   setSettings: (updates) => ipcRenderer.invoke('set-settings', updates),
   getAgentState: () => ipcRenderer.invoke('get-agent-state'),
   setAgentState: (agents) => ipcRenderer.invoke('set-agent-state', agents),
+  getStoreValue: (key) => ipcRenderer.invoke('get-store-value', key),
+  setStoreValue: (key, value) => ipcRenderer.invoke('set-store-value', key, value),
   getSystemMetrics: () => ipcRenderer.invoke('get-system-metrics'),
 };
 

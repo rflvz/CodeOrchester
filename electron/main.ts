@@ -3,6 +3,7 @@ import path from 'path';
 import { spawn, IPty } from 'node-pty';
 import { spawn as cpSpawn, ChildProcess } from 'child_process';
 import os from 'os';
+import { AppSettingsSchema, AgentStateSchema } from './schemas';
 
 let mainWindow: BrowserWindow | null = null;
 const ptys: Map<string, IPty> = new Map();
@@ -31,6 +32,7 @@ interface AppSettings {
   animationsEnabled: boolean;
 }
 
+
 const defaultSettings: AppSettings = {
   minimaxApiKey: '',
   minimaxAppId: '',
@@ -47,6 +49,11 @@ const defaultSettings: AppSettings = {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let store: any = null;
+
+// Per-session write-pty serialization: chains Promises so concurrent writes are
+// queued rather than killing each other. Eliminates the race condition between
+// consecutive write-pty calls for the same session.
+const writePtyQueue: Map<string, Promise<unknown>> = new Map();
 
 async function initStore() {
   const { default: Store } = await import('electron-store');
@@ -121,9 +128,13 @@ ipcMain.handle('get-settings', () => {
   return { ...defaultSettings, ...saved };
 });
 
-ipcMain.handle('set-settings', (_event, updates: Partial<AppSettings>) => {
+ipcMain.handle('set-settings', (_event, updates: unknown) => {
+  const result = AppSettingsSchema.safeParse(updates);
+  if (!result.success) {
+    return { success: false, error: `Invalid settings: ${result.error.message}` };
+  }
   const current = store?.get('settings') ?? defaultSettings;
-  store?.set('settings', { ...current, ...updates });
+  store?.set('settings', { ...current, ...result.data });
   return { success: true };
 });
 
@@ -131,8 +142,27 @@ ipcMain.handle('get-agent-state', () => {
   return store?.get('agents') ?? {};
 });
 
-ipcMain.handle('set-agent-state', (_event, agents: Record<string, unknown>) => {
-  store?.set('agents', agents);
+ipcMain.handle('set-agent-state', (_event, agents: unknown) => {
+  const result = AgentStateSchema.safeParse(agents);
+  if (!result.success) {
+    return { success: false, error: `Invalid agent state: ${result.error.message}` };
+  }
+  store?.set('agents', result.data);
+  return { success: true };
+});
+
+// Generic key-value store for renderer stores that need Electron-side persistence
+// (e.g. notificationStore, skillStore). Keys are namespaced by the caller.
+ipcMain.handle('get-store-value', (_event, key: unknown) => {
+  if (typeof key !== 'string' || !key) return null;
+  return store?.get(key) ?? null;
+});
+
+ipcMain.handle('set-store-value', (_event, key: unknown, value: unknown) => {
+  if (typeof key !== 'string' || !key) {
+    return { success: false, error: 'Invalid key' };
+  }
+  store?.set(key, value);
   return { success: true };
 });
 
@@ -217,6 +247,16 @@ ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string, initi
 });
 
 ipcMain.handle('write-pty', async (_event, sessionId: string, data: string, initialPrompt?: string) => {
+  // Serialize concurrent write-pty calls for the same session by chaining onto a
+  // per-session Promise. This eliminates the race condition where a second call kills
+  // the first process mid-execution.
+  const prev = writePtyQueue.get(sessionId) ?? Promise.resolve();
+  const current = prev.then(() => _writePtyImpl(sessionId, data, initialPrompt));
+  writePtyQueue.set(sessionId, current.catch(() => { /* swallow so queue stays healthy */ }));
+  return current;
+});
+
+async function _writePtyImpl(sessionId: string, data: string, initialPrompt?: string): Promise<{ success: boolean; error?: string }> {
   // Lazy initialization: handle the race where handleSend fires before start-pty completes.
   if (!jsonLineBuffer.has(sessionId)) {
     jsonLineBuffer.set(sessionId, '');
@@ -355,7 +395,7 @@ ipcMain.handle('write-pty', async (_event, sessionId: string, data: string, init
   });
 
   return { success: true };
-});
+}
 
 ipcMain.handle('resize-pty', async (_event, sessionId: string, cols: number, rows: number) => {
   const pty = ptys.get(sessionId);
