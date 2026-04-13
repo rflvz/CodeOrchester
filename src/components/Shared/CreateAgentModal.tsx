@@ -36,6 +36,7 @@ export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalP
   const [selectedIcon, setSelectedIcon] = useState('psychology');
   const [capabilities, setCapabilities] = useState<string[]>(['code_analysis', 'data_synthesis']);
   const [initialInstructions, setInitialInstructions] = useState('');
+  const [inactivityTimeout, setInactivityTimeout] = useState(5);
 
   useEffect(() => {
     if (isOpen && existingAgent) {
@@ -44,12 +45,14 @@ export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalP
       setSelectedIcon(existingAgent.icon || 'psychology');
       setCapabilities(existingAgent.skills);
       setInitialInstructions(existingAgent.instructions || '');
+      setInactivityTimeout(existingAgent.inactivityTimeout ?? 5);
     } else if (isOpen && !isEditing) {
       setAgentName('');
       setDescription('');
       setSelectedIcon('psychology');
       setCapabilities(['code_analysis', 'data_synthesis']);
       setInitialInstructions('');
+      setInactivityTimeout(5);
     }
     if (isOpen) {
       setCurrentStep(1);
@@ -96,6 +99,7 @@ export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalP
       skills: capabilities,
       icon: selectedIcon,
       instructions: initialInstructions,
+      inactivityTimeout,
     };
 
     if (isEditing && agentId) {
@@ -306,6 +310,23 @@ export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalP
                       <span className="block text-[10px] font-bold text-on-surface-variant uppercase mb-1">Runtime</span>
                       <span className="text-xs font-black text-on-surface uppercase">Claude CLI</span>
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">
+                      Inactivity Timeout (minutes)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={inactivityTimeout}
+                      onChange={(e) => setInactivityTimeout(Math.max(1, Math.min(60, Number(e.target.value))))}
+                      className="w-full bg-surface-container-lowest border-0 ring-1 ring-outline-variant/15 focus:ring-primary/40 p-4 text-on-surface font-mono text-sm tracking-tight transition-all"
+                    />
+                    <p className="text-[10px] text-on-surface-variant font-mono mt-1">
+                      Si no hay output del agente en este tiempo, se marcará como error. Default: 5 min.
+                    </p>
                   </div>
 
                   <p className="text-xs text-on-surface-variant font-mono">

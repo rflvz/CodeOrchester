@@ -11,6 +11,7 @@ export interface Agent {
   trabajoTerminado: boolean; // TODO: Consider renaming to isComplete/finished for English consistency
   icon?: string;
   instructions?: string;
+  inactivityTimeout?: number; // minutes before marking agent as error, default 5
   createdAt: Date;
 }
 
