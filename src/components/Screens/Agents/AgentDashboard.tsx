@@ -32,7 +32,6 @@ export function AgentDashboard() {
 
   const handleEditAgent = (agentId: string) => {
     setEditingAgent(agentId);
-    setActiveAgent(agentId);
   };
 
   const handleDeleteConfirm = () => {

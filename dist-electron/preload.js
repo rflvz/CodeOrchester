@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 const api = {
-    startPty: (sessionId, cwd, initialPrompt) => electron_1.ipcRenderer.invoke('start-pty', sessionId, cwd, initialPrompt),
+    startPty: (sessionId, cwd, initialPrompt, model) => electron_1.ipcRenderer.invoke('start-pty', sessionId, cwd, initialPrompt, model),
     writePty: (sessionId, data, initialPrompt) => electron_1.ipcRenderer.invoke('write-pty', sessionId, data, initialPrompt),
     resizePty: (sessionId, cols, rows) => electron_1.ipcRenderer.invoke('resize-pty', sessionId, cols, rows),
     killPty: (sessionId) => electron_1.ipcRenderer.invoke('kill-pty', sessionId),
@@ -51,6 +51,9 @@ const api = {
     setSettings: (updates) => electron_1.ipcRenderer.invoke('set-settings', updates),
     getAgentState: () => electron_1.ipcRenderer.invoke('get-agent-state'),
     setAgentState: (agents) => electron_1.ipcRenderer.invoke('set-agent-state', agents),
+    getStoreValue: (key) => electron_1.ipcRenderer.invoke('get-store-value', key),
+    setStoreValue: (key, value) => electron_1.ipcRenderer.invoke('set-store-value', key, value),
     getSystemMetrics: () => electron_1.ipcRenderer.invoke('get-system-metrics'),
+    showDirectoryDialog: () => electron_1.ipcRenderer.invoke('show-directory-dialog'),
 };
 electron_1.contextBridge.exposeInMainWorld('electron', api);

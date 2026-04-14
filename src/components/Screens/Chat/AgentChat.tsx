@@ -12,6 +12,14 @@ import { AgentAvatar } from '../../Shared/AgentAvatar';
 // Stable fallback — prevents useChatStore selector from returning a new [] reference
 // each render, which would cause an infinite re-render loop via useSyncExternalStore.
 const EMPTY_MESSAGES: ChatMessage[] = [];
+
+const MODEL_IDS: Record<string, string> = {
+  haiku: 'claude-haiku-4-5-20251001',
+  sonnet: 'claude-sonnet-4-6',
+  opus:   'claude-opus-4-6',
+};
+const getModelId = (model?: string): string | undefined =>
+  model ? MODEL_IDS[model] : undefined;
 import { StatusChip } from '../../Shared/StatusChip';
 
 interface ConvMeta {
@@ -43,10 +51,14 @@ export function AgentChat() {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [typingAgents, setTypingAgents] = useState<Set<string>>(new Set());
+  // Incremented to force the auto-start effect to re-run when the model is changed mid-session
+  const [sessionRestartTrigger, setSessionRestartTrigger] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [savedSettings, setSavedSettings] = useState<{ claudeWorkDir?: string; claudeCliPath?: string } | null>(null);
+  // Ref so that the auto-PTY effect always reads the latest settings without becoming a dep
+  const savedSettingsRef = useRef<{ claudeWorkDir?: string; claudeCliPath?: string } | null>(null);
 
   useEffect(() => {
     window.electron?.getSettings().then((s) => {
@@ -54,12 +66,24 @@ export function AgentChat() {
     });
   }, []);
 
+  useEffect(() => { savedSettingsRef.current = savedSettings; }, [savedSettings]);
+
   // Ref para trackear cuántos logs del session activo ya se mostraron
   const processedCountRef = useRef(0);
 
-  // Resetear estado al cambiar de agente
+  // Sync processedCount when activeAgentId changes (including on component mount).
+  // Setting to 0 would cause recentLogs already in chatStore to be re-processed
+  // and duplicated every time the screen is left and returned to.
+  // Instead, we fast-forward to the current log count so only NEW logs get added.
   useEffect(() => {
-    processedCountRef.current = 0;
+    if (activeAgentId) {
+      const sessionId = useTerminalStore.getState().getSessionIdByAgentId(activeAgentId);
+      processedCountRef.current = sessionId
+        ? useTerminalStore.getState().recentLogs.filter((l) => l.sessionId === sessionId).length
+        : 0;
+    } else {
+      processedCountRef.current = 0;
+    }
     setIsProcessing(false);
     setTypingAgents(new Set());
   }, [activeAgentId]);
@@ -68,7 +92,11 @@ export function AgentChat() {
 
   // Feed PTY logs from the active agent's session into the chatStore
   useEffect(() => {
+    // Guard: only when activeConversationId has caught up with activeAgentId.
+    // Without this, logs/labels from one agent can bleed into another agent's conversation
+    // during the render gap between activeAgentId changing and the state update settling.
     if (!activeAgentId || !activeConversationId || !activeAgent) return;
+    if (activeConversationId !== activeAgentId) return;
 
     const sessionId = useTerminalStore.getState().getSessionIdByAgentId(activeAgentId);
     if (!sessionId) return;
@@ -128,34 +156,83 @@ export function AgentChat() {
     setActiveConversationId(activeAgentId);
   }, [activeAgentId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleSelectAgent = async (agentId: string) => {
-    setActiveAgent(agentId);
-    setShowAgentList(false);
+  // Keep the system message (id:'1') in sync when the agent's name or skills are edited.
+  // Only fires on those two fields to avoid running on every heartbeat status change.
+  // Guard: skip when activeConversationId hasn't settled to activeAgentId yet (agent switch race).
+  const agentName = activeAgent?.name ?? '';
+  const agentSkillsKey = activeAgent?.skills.join('\x00') ?? '';
+  useEffect(() => {
+    if (!activeConversationId || !activeAgent || !activeAgentId) return;
+    if (activeConversationId !== activeAgentId) return;
+    const updated = `Conversación iniciada con ${activeAgent.name}.\nEstado: ${activeAgent.status}\nSkills: ${activeAgent.skills.join(', ') || 'Ninguna'}`;
+    useChatStore.getState().updateMessage(activeConversationId, '1', updated);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConversationId, agentName, agentSkillsKey]);
 
-    const agent = agents[agentId];
+  // When the same agent's model is changed, kill the current PTY and restart with the new model.
+  // Uses agentId::model key to distinguish a genuine model edit from an agent switch
+  // (switching agents also changes activeAgent?.model but should NOT trigger a restart).
+  const agentModelKeyRef = useRef('');
+  const agentModelKey = `${activeAgentId ?? ''}::${activeAgent?.model ?? ''}`;
+  useEffect(() => {
+    const prevKey = agentModelKeyRef.current;
+    agentModelKeyRef.current = agentModelKey;
+
+    if (!prevKey || !activeAgentId) return; // initial mount — nothing to compare yet
+
+    const colonIdx = prevKey.indexOf('::');
+    const prevAgentId = prevKey.slice(0, colonIdx);
+    const prevModel  = prevKey.slice(colonIdx + 2);
+    const currModel  = activeAgent?.model ?? '';
+
+    // Agent switch: different agent — don't restart, just record new baseline
+    if (prevAgentId !== activeAgentId) return;
+    // Same model — nothing changed
+    if (prevModel === currModel) return;
+
+    // Same agent, different model → restart session with new model
+    window.electron?.killPty(activeAgentId).catch(() => {});
+    useTerminalStore.getState().unregisterAgentSession(activeAgentId);
+
+    // Use activeAgentId directly as conv key (it always equals activeConversationId when synced)
+    useChatStore.getState().addMessage(activeAgentId, {
+      id: crypto.randomUUID(),
+      type: 'system',
+      content: `🔄 Modelo actualizado a ${(currModel || 'DEFAULT').toUpperCase()} — sesión reiniciada.`,
+      timestamp: new Date(),
+    });
+
+    setSessionRestartTrigger((n) => n + 1);
+  }, [agentModelKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-start PTY whenever activeAgentId changes or a session restart is requested.
+  // Also covers external navigation from AgentDashboard. Skips if a session already exists.
+  useEffect(() => {
+    if (!activeAgentId) return;
+    const existingSession = useTerminalStore.getState().getSessionIdByAgentId(activeAgentId);
+    if (existingSession) return;
+    const agent = useAgentStore.getState().agents[activeAgentId];
     if (!agent) return;
-
-    const skillsContext = agent.skills.length > 0
+    const skillsCtx = agent.skills.length > 0
       ? `Your skills: ${agent.skills.join(', ')}`
       : 'You have no specific skills configured.';
+    const prompt = `You are ${agent.name}. ${agent.instructions || ''}\n\n${skillsCtx}`;
+    const modelId = getModelId(agent.model);
+    window.electron?.startPty(activeAgentId, savedSettingsRef.current?.claudeWorkDir || undefined, prompt, modelId)
+      .then((result) => {
+        if (result?.success) {
+          useTerminalStore.getState().registerAgentSession(activeAgentId, activeAgentId);
+        } else {
+          console.error('[AgentChat] auto-startPty failed:', result?.error);
+        }
+      })
+      .catch((err) => console.error('[AgentChat] auto-startPty exception:', err));
+  }, [activeAgentId, sessionRestartTrigger]); // uses getState() internally to avoid stale closure deps
 
-    const initialPrompt = `You are ${agent.name}. ${agent.instructions || ''}\n\n${skillsContext}`;
-
-    try {
-      const result = await window.electron?.startPty(
-        agentId,
-        savedSettings?.claudeWorkDir || undefined,
-        initialPrompt
-      );
-
-      if (result?.success) {
-        useTerminalStore.getState().registerAgentSession(agentId, agentId);
-      } else {
-        console.error('[AgentChat] startPty failed:', result?.error);
-      }
-    } catch (err) {
-      console.error('[AgentChat] startPty exception:', err);
-    }
+  const handleSelectAgent = (agentId: string) => {
+    setActiveAgent(agentId);
+    setShowAgentList(false);
+    // PTY start is handled by the auto-start effect above
   };
 
   const handleSend = async () => {

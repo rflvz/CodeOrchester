@@ -1,19 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Plus, Settings, Brain, Database, Shield, Languages, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Plus, Settings, Brain, Database, Shield, Languages, ChevronRight, ChevronLeft, FolderOpen, X } from 'lucide-react';
 import { useAgentStore } from '../../stores/agentStore';
+import { useSkillStore } from '../../stores/skillStore';
 
 interface CreateAgentModalProps {
   isOpen: boolean;
   onClose: () => void;
   agentId?: string;
 }
-
-const capabilityOptions = [
-  { id: 'code_analysis', label: 'Code Analysis', description: 'Debug, refactor, and review' },
-  { id: 'web_search', label: 'Web Search', description: 'Real-time external indexing' },
-  { id: 'data_synthesis', label: 'Data Synthesis', description: 'Multi-modal pattern matching' },
-  { id: 'network_access', label: 'Network Access', description: 'Control remote terminal nodes' },
-];
 
 const iconOptions = [
   { id: 'psychology', icon: <Brain className="w-6 h-6" />, label: 'Psychology' },
@@ -22,20 +16,55 @@ const iconOptions = [
   { id: 'language', icon: <Languages className="w-6 h-6" />, label: 'Language' },
 ];
 
+const modelOptions = [
+  {
+    id: 'haiku' as const,
+    label: 'Claude Haiku',
+    description: 'Fast & lightweight. Ideal for simple tasks.',
+    badge: 'FAST',
+  },
+  {
+    id: 'sonnet' as const,
+    label: 'Claude Sonnet',
+    description: 'Balanced performance. Best for most agents.',
+    badge: 'BALANCED',
+  },
+  {
+    id: 'opus' as const,
+    label: 'Claude Opus',
+    description: 'Most capable. Complex reasoning tasks.',
+    badge: 'POWERFUL',
+  },
+];
+
 type Step = 1 | 2 | 3;
 
 export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalProps) {
   const { agents, createAgent, updateAgent } = useAgentStore();
+  const { skills } = useSkillStore();
   const isEditing = Boolean(agentId);
   const existingAgent = agentId ? agents[agentId] : null;
+  const skillsList = Object.values(skills);
 
   const [currentStep, setCurrentStep] = useState<Step>(1);
+
+  // Step 1: Identity
   const [agentName, setAgentName] = useState('');
   const [nameError, setNameError] = useState('');
   const [description, setDescription] = useState('');
   const [selectedIcon, setSelectedIcon] = useState('psychology');
-  const [capabilities, setCapabilities] = useState<string[]>(['code_analysis', 'data_synthesis']);
+
+  // Step 2: Intellect
+  const [model, setModel] = useState<'haiku' | 'sonnet' | 'opus'>('sonnet');
+  const [temperature, setTemperature] = useState(0.7);
+  const [maxTokens, setMaxTokens] = useState(4096);
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [initialInstructions, setInitialInstructions] = useState('');
+
+  // Step 3: Deployment
+  const [cwd, setCwd] = useState('');
+  const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
+  const [autoStart, setAutoStart] = useState(false);
   const [inactivityTimeout, setInactivityTimeout] = useState(5);
 
   useEffect(() => {
@@ -43,15 +72,29 @@ export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalP
       setAgentName(existingAgent.name);
       setDescription(existingAgent.description);
       setSelectedIcon(existingAgent.icon || 'psychology');
-      setCapabilities(existingAgent.skills);
+      setModel(existingAgent.model ?? 'sonnet');
+      setTemperature(existingAgent.temperature ?? 0.7);
+      setMaxTokens(existingAgent.maxTokens ?? 4096);
+      setSelectedSkills(existingAgent.skills);
       setInitialInstructions(existingAgent.instructions || '');
+      setCwd(existingAgent.cwd ?? '');
+      setEnvVars(
+        Object.entries(existingAgent.envVars ?? {}).map(([key, value]) => ({ key, value }))
+      );
+      setAutoStart(existingAgent.autoStart ?? false);
       setInactivityTimeout(existingAgent.inactivityTimeout ?? 5);
     } else if (isOpen && !isEditing) {
       setAgentName('');
       setDescription('');
       setSelectedIcon('psychology');
-      setCapabilities(['code_analysis', 'data_synthesis']);
+      setModel('sonnet');
+      setTemperature(0.7);
+      setMaxTokens(4096);
+      setSelectedSkills([]);
       setInitialInstructions('');
+      setCwd('');
+      setEnvVars([]);
+      setAutoStart(false);
       setInactivityTimeout(5);
     }
     if (isOpen) {
@@ -60,9 +103,9 @@ export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalP
     }
   }, [isOpen, agentId]);
 
-  const handleToggleCapability = (id: string) => {
-    setCapabilities((prev) =>
-      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
+  const handleToggleSkill = (id: string) => {
+    setSelectedSkills((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
     );
   };
 
@@ -89,17 +132,48 @@ export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalP
     if (currentStep > 1) setCurrentStep((s) => (s - 1) as Step);
   };
 
+  const handleBrowseCwd = async () => {
+    if (!window.electron?.showDirectoryDialog) return;
+    const selected = await window.electron.showDirectoryDialog();
+    if (selected) setCwd(selected);
+  };
+
+  const handleAddEnvVar = () => {
+    setEnvVars((prev) => [...prev, { key: '', value: '' }]);
+  };
+
+  const handleEnvVarChange = (index: number, field: 'key' | 'value', val: string) => {
+    setEnvVars((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, [field]: val } : row))
+    );
+  };
+
+  const handleRemoveEnvVar = (index: number) => {
+    setEnvVars((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = () => {
     const error = validateName(agentName);
     if (error) { setNameError(error); return; }
 
+    const envVarsRecord: Record<string, string> = {};
+    for (const { key, value } of envVars) {
+      if (key.trim()) envVarsRecord[key.trim()] = value;
+    }
+
     const agentData = {
       name: agentName.trim().toUpperCase().replace(/\s+/g, '_'),
       description,
-      skills: capabilities,
+      skills: selectedSkills,
       icon: selectedIcon,
       instructions: initialInstructions,
       inactivityTimeout,
+      model,
+      temperature,
+      maxTokens,
+      cwd: cwd.trim() || undefined,
+      envVars: Object.keys(envVarsRecord).length > 0 ? envVarsRecord : undefined,
+      autoStart,
     };
 
     if (isEditing && agentId) {
@@ -250,26 +324,105 @@ export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalP
                     <h3 className="text-sm font-bold text-on-surface uppercase tracking-wider">Capabilities & Initial Intellect</h3>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    {capabilityOptions.map((cap) => (
-                      <label
-                        key={cap.id}
-                        className="flex items-center gap-3 p-4 bg-surface-container-low hover:bg-surface-container cursor-pointer transition-colors rounded"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={capabilities.includes(cap.id)}
-                          onChange={() => handleToggleCapability(cap.id)}
-                          className="w-5 h-5 bg-surface-container-lowest border border-outline-variant/30 text-primary-container focus:ring-0 rounded-sm"
-                        />
-                        <div className="flex flex-col">
-                          <span className="text-xs font-bold text-on-surface uppercase tracking-wider">{cap.label}</span>
-                          <span className="text-[10px] text-on-surface-variant uppercase">{cap.description}</span>
-                        </div>
-                      </label>
-                    ))}
+                  {/* Model Selector */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-3">
+                      Claude Model
+                    </label>
+                    <div className="grid grid-cols-3 gap-3">
+                      {modelOptions.map((opt) => (
+                        <button
+                          key={opt.id}
+                          onClick={() => setModel(opt.id)}
+                          className={`p-3 rounded text-left transition-all ring-1 ${
+                            model === opt.id
+                              ? 'ring-primary bg-surface-container-high'
+                              : 'ring-outline-variant/15 bg-surface-container-low hover:ring-primary/40'
+                          }`}
+                        >
+                          <span className={`text-[9px] font-bold uppercase tracking-widest block mb-1 ${
+                            model === opt.id ? 'text-primary' : 'text-on-surface-variant'
+                          }`}>{opt.badge}</span>
+                          <span className="text-xs font-bold text-on-surface uppercase block">{opt.label}</span>
+                          <span className="text-[10px] text-on-surface-variant mt-1 block">{opt.description}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
+                  {/* Temperature */}
+                  <div>
+                    <div className="flex justify-between items-center mb-2">
+                      <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
+                        Temperature
+                      </label>
+                      <span className="text-xs font-mono font-bold text-primary">{temperature.toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={temperature}
+                      onChange={(e) => setTemperature(Number(e.target.value))}
+                      className="w-full accent-primary"
+                    />
+                    <div className="flex justify-between text-[10px] text-on-surface-variant font-mono mt-1">
+                      <span>0.00 — Precise</span>
+                      <span>1.00 — Creative</span>
+                    </div>
+                  </div>
+
+                  {/* Max Tokens */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">
+                      Max Tokens
+                    </label>
+                    <input
+                      type="number"
+                      min={256}
+                      max={32000}
+                      step={256}
+                      value={maxTokens}
+                      onChange={(e) => setMaxTokens(Math.max(256, Math.min(32000, Number(e.target.value))))}
+                      className="w-full bg-surface-container-lowest border-0 ring-1 ring-outline-variant/15 focus:ring-primary/40 p-4 text-on-surface font-mono text-sm tracking-tight transition-all"
+                    />
+                  </div>
+
+                  {/* Skills from store */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-3">
+                      Assigned Skills
+                    </label>
+                    {skillsList.length === 0 ? (
+                      <div className="p-4 bg-surface-container-low rounded text-center">
+                        <p className="text-xs text-on-surface-variant">No hay skills disponibles.</p>
+                        <p className="text-[10px] text-on-surface-variant/60 mt-1">Crea skills en la sección Skills.</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2">
+                        {skillsList.map((skill) => (
+                          <label
+                            key={skill.id}
+                            className="flex items-start gap-3 p-3 bg-surface-container-low hover:bg-surface-container cursor-pointer transition-colors rounded"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedSkills.includes(skill.id)}
+                              onChange={() => handleToggleSkill(skill.id)}
+                              className="w-4 h-4 mt-0.5 bg-surface-container-lowest border border-outline-variant/30 text-primary-container focus:ring-0 rounded-sm flex-shrink-0"
+                            />
+                            <div className="flex flex-col min-w-0">
+                              <span className="text-xs font-bold text-on-surface uppercase tracking-wider truncate">{skill.name}</span>
+                              <span className="text-[10px] text-on-surface-variant uppercase">{skill.category}</span>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Initial Instructions */}
                   <div>
                     <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">
                       Initial Instructions
@@ -278,7 +431,7 @@ export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalP
                       value={initialInstructions}
                       onChange={(e) => setInitialInstructions(e.target.value)}
                       placeholder="Direct system prompt or specialized logic constraints..."
-                      rows={6}
+                      rows={5}
                       className="w-full bg-surface-container-lowest border-0 ring-1 ring-outline-variant/15 focus:ring-primary/40 p-4 text-on-surface font-mono text-sm tracking-tight placeholder:text-on-surface-variant/50 transition-all resize-none"
                     />
                   </div>
@@ -293,25 +446,96 @@ export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalP
                     <h3 className="text-sm font-bold text-on-surface uppercase tracking-wider">Deployment Configuration</h3>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="p-4 bg-surface-container-low rounded">
-                      <span className="block text-[10px] font-bold text-on-surface-variant uppercase mb-1">Architecture</span>
-                      <span className="text-xs font-black text-on-surface uppercase">Transformer-L4</span>
-                    </div>
-                    <div className="p-4 bg-surface-container-low rounded">
-                      <span className="block text-[10px] font-bold text-on-surface-variant uppercase mb-1">Latency Tier</span>
-                      <span className="text-xs font-black text-on-surface uppercase">&lt; 150ms / Ultra</span>
-                    </div>
-                    <div className="p-4 bg-surface-container-low rounded">
-                      <span className="block text-[10px] font-bold text-on-surface-variant uppercase mb-1">Memory Allocation</span>
-                      <span className="text-xs font-black text-on-surface uppercase">4096MB</span>
-                    </div>
-                    <div className="p-4 bg-surface-container-low rounded">
-                      <span className="block text-[10px] font-bold text-on-surface-variant uppercase mb-1">Runtime</span>
-                      <span className="text-xs font-black text-on-surface uppercase">Claude CLI</span>
+                  {/* Working Directory */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">
+                      Working Directory
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={cwd}
+                        onChange={(e) => setCwd(e.target.value)}
+                        placeholder="/home/user/project"
+                        className="flex-1 bg-surface-container-lowest border-0 ring-1 ring-outline-variant/15 focus:ring-primary/40 p-4 text-on-surface font-mono text-sm tracking-tight placeholder:text-on-surface-variant/50 transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleBrowseCwd}
+                        className="flex items-center gap-2 px-4 py-3 bg-surface-container-low hover:bg-surface-container-high ring-1 ring-outline-variant/15 hover:ring-primary/40 text-xs font-bold uppercase tracking-wider text-on-surface-variant hover:text-on-surface transition-all rounded-sm"
+                      >
+                        <FolderOpen className="w-4 h-4" />
+                        Browse
+                      </button>
                     </div>
                   </div>
 
+                  {/* Environment Variables */}
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
+                        Environment Variables
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleAddEnvVar}
+                        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-primary hover:text-primary/80 transition-colors"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Add variable
+                      </button>
+                    </div>
+                    {envVars.length === 0 ? (
+                      <p className="text-[10px] text-on-surface-variant font-mono">No hay variables definidas.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {envVars.map((row, i) => (
+                          <div key={i} className="flex gap-2 items-center">
+                            <input
+                              type="text"
+                              value={row.key}
+                              onChange={(e) => handleEnvVarChange(i, 'key', e.target.value)}
+                              placeholder="KEY"
+                              className="w-2/5 bg-surface-container-lowest border-0 ring-1 ring-outline-variant/15 focus:ring-primary/40 px-3 py-2 text-on-surface font-mono text-xs placeholder:text-on-surface-variant/50 transition-all"
+                            />
+                            <span className="text-on-surface-variant text-xs">=</span>
+                            <input
+                              type="text"
+                              value={row.value}
+                              onChange={(e) => handleEnvVarChange(i, 'value', e.target.value)}
+                              placeholder="value"
+                              className="flex-1 bg-surface-container-lowest border-0 ring-1 ring-outline-variant/15 focus:ring-primary/40 px-3 py-2 text-on-surface font-mono text-xs placeholder:text-on-surface-variant/50 transition-all"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveEnvVar(i)}
+                              className="p-1.5 hover:bg-error/20 hover:text-error text-on-surface-variant rounded transition-colors"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* AutoStart Toggle */}
+                  <div>
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={autoStart}
+                        onChange={(e) => setAutoStart(e.target.checked)}
+                        className="w-4 h-4 bg-surface-container-lowest border border-outline-variant/30 text-primary focus:ring-0 rounded-sm"
+                      />
+                      <div>
+                        <span className="text-xs font-bold text-on-surface uppercase tracking-wider block">Auto-Start</span>
+                        <span className="text-[10px] text-on-surface-variant">Iniciar agente automáticamente al abrir sesión</span>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* Inactivity Timeout */}
                   <div>
                     <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">
                       Inactivity Timeout (minutes)
@@ -376,9 +600,9 @@ export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalP
                       </div>
                     </div>
                     <div className="font-mono text-[10px] text-on-surface-variant space-y-1">
-                      <p>&gt; WAITING FOR SEED CONFIG...</p>
-                      <p>&gt; SCHEMA DETECTED: [AGENT_CORE_V1]</p>
-                      <p>&gt; RESOURCE ALLOCATION: 4096MB</p>
+                      <p>&gt; MODEL: {model.toUpperCase()}</p>
+                      <p>&gt; TEMP: {temperature.toFixed(2)} / MAX_TOKENS: {maxTokens}</p>
+                      <p>&gt; SKILLS: {selectedSkills.length} assigned</p>
                     </div>
                   </div>
                 </div>
@@ -388,15 +612,18 @@ export function CreateAgentModal({ isOpen, onClose, agentId }: CreateAgentModalP
                     Assigned Skills
                   </h4>
                   <div className="flex flex-wrap gap-2">
-                    {capabilities.length > 0 ? (
-                      capabilities.map((cap) => (
-                        <span
-                          key={cap}
-                          className="bg-surface-container-highest px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-primary border border-primary/20 rounded-sm"
-                        >
-                          {capabilityOptions.find((c) => c.id === cap)?.label}
-                        </span>
-                      ))
+                    {selectedSkills.length > 0 ? (
+                      selectedSkills.map((id) => {
+                        const skill = skills[id];
+                        return (
+                          <span
+                            key={id}
+                            className="bg-surface-container-highest px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-primary border border-primary/20 rounded-sm"
+                          >
+                            {skill?.name ?? id}
+                          </span>
+                        );
+                      })
                     ) : (
                       <span className="text-[10px] text-on-surface-variant">No skills selected</span>
                     )}
