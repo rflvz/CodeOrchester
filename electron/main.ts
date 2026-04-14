@@ -15,6 +15,8 @@ const agentProcs: Map<string, ChildProcess> = new Map();
 const claudeSessionIds: Map<string, string> = new Map();
 // Per-session agent identity (system prompt for first turn)
 const agentIdentity: Map<string, string> = new Map();
+// Per-session Claude model override (e.g. 'claude-opus-4-6')
+const agentModels: Map<string, string> = new Map();
 // Per-session line buffer for NDJSON parsing (claude -p --output-format stream-json)
 const jsonLineBuffer: Map<string, string> = new Map();
 
@@ -184,7 +186,7 @@ ipcMain.handle('get-system-metrics', () => {
 // Per-turn approach: each user message spawns a new claude -p process with full conversation history.
 // This gives clean NDJSON output (no terminal chrome/echo) AND proper multi-turn context.
 
-ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string, initialPrompt?: string) => {
+ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string, initialPrompt?: string, model?: string) => {
   // Kill any existing PTY for this session
   const existing = ptys.get(sessionId);
   if (existing) {
@@ -211,6 +213,9 @@ ipcMain.handle('start-pty', async (_event, sessionId: string, cwd: string, initi
   if (initialPrompt) {
     // Agent session: store identity; actual PTY spawned on first write-pty.
     agentIdentity.set(sessionId, initialPrompt);
+    // Store model override so _writePtyImpl can pass --model on first turn
+    if (model) agentModels.set(sessionId, model);
+    else agentModels.delete(sessionId);
     jsonLineBuffer.set(sessionId, '');
     // claudeSessionIds not set yet — will be created on first write-pty
 
@@ -306,6 +311,8 @@ async function _writePtyImpl(sessionId: string, data: string, initialPrompt?: st
     cliArgs = ['-p', '--verbose', '--session-id', sessionUUID,
                '--system-prompt', identity,
                '--output-format', 'stream-json', '--include-partial-messages'];
+    const storedModel = agentModels.get(sessionId);
+    if (storedModel) cliArgs.push('--model', storedModel);
   }
 
   // Use child_process.spawn with shell:true (resolves .cmd on Windows) and piped stdio.
@@ -424,6 +431,7 @@ ipcMain.handle('kill-pty', async (_event, sessionId: string) => {
   }
   claudeSessionIds.delete(sessionId);
   agentIdentity.delete(sessionId);
+  agentModels.delete(sessionId);
   jsonLineBuffer.delete(sessionId);
   if (proc || pty) return { success: true };
   return { success: false, error: 'Session not found' };

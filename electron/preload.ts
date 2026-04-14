@@ -21,7 +21,7 @@ export interface SystemMetrics {
 }
 
 export interface ElectronAPI {
-  startPty: (sessionId: string, cwd?: string, initialPrompt?: string) => Promise<{ success: boolean; pid?: number; error?: string }>;
+  startPty: (sessionId: string, cwd?: string, initialPrompt?: string, model?: string) => Promise<{ success: boolean; pid?: number; error?: string }>;
   writePty: (sessionId: string, data: string, initialPrompt?: string) => Promise<{ success: boolean; error?: string }>;
   resizePty: (sessionId: string, cols: number, rows: number) => Promise<{ success: boolean; error?: string }>;
   killPty: (sessionId: string) => Promise<{ success: boolean; error?: string }>;
@@ -49,7 +49,7 @@ export interface ElectronAPI {
 }
 
 const api: ElectronAPI = {
-  startPty: (sessionId, cwd, initialPrompt) => ipcRenderer.invoke('start-pty', sessionId, cwd, initialPrompt),
+  startPty: (sessionId, cwd, initialPrompt, model) => ipcRenderer.invoke('start-pty', sessionId, cwd, initialPrompt, model),
   writePty: (sessionId, data, initialPrompt) => ipcRenderer.invoke('write-pty', sessionId, data, initialPrompt),
   resizePty: (sessionId, cols, rows) => ipcRenderer.invoke('resize-pty', sessionId, cols, rows),
   killPty: (sessionId) => ipcRenderer.invoke('kill-pty', sessionId),

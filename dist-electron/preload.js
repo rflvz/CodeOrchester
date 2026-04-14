@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 const api = {
-    startPty: (sessionId, cwd, initialPrompt) => electron_1.ipcRenderer.invoke('start-pty', sessionId, cwd, initialPrompt),
+    startPty: (sessionId, cwd, initialPrompt, model) => electron_1.ipcRenderer.invoke('start-pty', sessionId, cwd, initialPrompt, model),
     writePty: (sessionId, data, initialPrompt) => electron_1.ipcRenderer.invoke('write-pty', sessionId, data, initialPrompt),
     resizePty: (sessionId, cols, rows) => electron_1.ipcRenderer.invoke('resize-pty', sessionId, cols, rows),
     killPty: (sessionId) => electron_1.ipcRenderer.invoke('kill-pty', sessionId),

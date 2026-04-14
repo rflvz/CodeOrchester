@@ -3,7 +3,7 @@
 declare global {
   interface Window {
     electron?: {
-      startPty: (sessionId: string, cwd?: string, initialPrompt?: string) => Promise<{ success: boolean; pid?: number; error?: string }>;
+      startPty: (sessionId: string, cwd?: string, initialPrompt?: string, model?: string) => Promise<{ success: boolean; pid?: number; error?: string }>;
       writePty: (sessionId: string, data: string, initialPrompt?: string) => Promise<{ success: boolean; error?: string }>;
       resizePty: (sessionId: string, cols: number, rows: number) => Promise<{ success: boolean; error?: string }>;
       killPty: (sessionId: string) => Promise<{ success: boolean; error?: string }>;
