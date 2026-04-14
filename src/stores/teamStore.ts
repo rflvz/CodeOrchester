@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Team, AgentConnection } from '../types';
-import { electronStorage } from './electronStorage';
+import { createElectronStorage } from './electronStorage';
 
 interface TeamStore {
   teams: Record<string, Team>;
@@ -126,7 +126,7 @@ export const useTeamStore = create<TeamStore>()(
     }),
     {
       name: 'team-store',
-      storage: createJSONStorage(() => electronStorage),
+      storage: createJSONStorage(() => createElectronStorage('team-store')),
       partialize: (state) => ({ teams: state.teams }),
     }
   )
