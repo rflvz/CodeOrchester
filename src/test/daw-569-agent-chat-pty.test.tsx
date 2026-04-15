@@ -85,7 +85,8 @@ describe('DAW-569 – AgentChat PTY integration', () => {
       expect(mockElectron.startPty).toHaveBeenCalledWith(
         agentId,
         undefined,
-        expect.stringContaining('AlphaBot')
+        expect.stringContaining('AlphaBot'),
+        undefined  // 4th arg: modelId — undefined when agent has no model configured
       );
     });
   });
@@ -235,7 +236,7 @@ describe('DAW-569 – AgentChat PTY integration', () => {
       agentId = makeAgent('HistoryBot').id;
       useTerminalStore.getState().registerAgentSession(agentId, agentId);
       useChatStore.getState().initConversation(agentId, [
-        { id: '1', type: 'user', content: 'Previous message', timestamp: new Date(), status: 'sent' },
+        { id: 'user-prev-msg', type: 'user', content: 'Previous message', timestamp: new Date(), status: 'sent' },
       ]);
       useAgentStore.getState().setActiveAgent(agentId);
     });
@@ -250,6 +251,9 @@ describe('DAW-569 – AgentChat PTY integration', () => {
   it('no PTY session → shows error in chat, writePty NOT called', async () => {
     const user = userEvent.setup();
     let agentId!: string;
+
+    // Make auto-start fail so no session is ever registered
+    mockElectron.startPty.mockResolvedValueOnce({ success: false, error: 'PTY unavailable' });
 
     act(() => {
       agentId = makeAgent('NoSessionBot').id;
