@@ -13,19 +13,19 @@ type ElectronWithStorage = Window & {
 export const electronStorage: StateStorage = {
   getItem: async (_key: string) => {
     const electron = (window as ElectronWithStorage).electron;
-    if (!electron) return null;
+    if (!electron?.getAgentState) return null;
     const agents = await electron.getAgentState();
     return JSON.stringify({ state: { agents, activeAgentId: null }, version: 0 });
   },
   setItem: async (_key: string, value: string) => {
     const electron = (window as ElectronWithStorage).electron;
-    if (!electron) return;
+    if (!electron?.setAgentState) return;
     const parsed = JSON.parse(value) as { state: { agents: Record<string, unknown> } };
     await electron.setAgentState(parsed.state.agents);
   },
   removeItem: async (_key: string) => {
     const electron = (window as ElectronWithStorage).electron;
-    if (!electron) return;
+    if (!electron?.setAgentState) return;
     await electron.setAgentState({});
   },
 };
