@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 export interface ChatMessage {
   id: string;
@@ -21,56 +22,65 @@ interface ChatStore {
   clearConversation: (conversationId: string) => void;
 }
 
-export const useChatStore = create<ChatStore>((set) => ({
-  conversations: {},
+export const useChatStore = create<ChatStore>()(
+  persist(
+    (set) => ({
+      conversations: {},
 
-  addMessage: (conversationId, message) =>
-    set((state) => ({
-      conversations: {
-        ...state.conversations,
-        [conversationId]: [...(state.conversations[conversationId] ?? []), message],
-      },
-    })),
+      addMessage: (conversationId, message) =>
+        set((state) => ({
+          conversations: {
+            ...state.conversations,
+            [conversationId]: [...(state.conversations[conversationId] ?? []), message],
+          },
+        })),
 
-  addMessages: (conversationId, messages) =>
-    set((state) => ({
-      conversations: {
-        ...state.conversations,
-        [conversationId]: [...(state.conversations[conversationId] ?? []), ...messages],
-      },
-    })),
+      addMessages: (conversationId, messages) =>
+        set((state) => ({
+          conversations: {
+            ...state.conversations,
+            [conversationId]: [...(state.conversations[conversationId] ?? []), ...messages],
+          },
+        })),
 
-  updateMessage: (conversationId, messageId, content) =>
-    set((state) => ({
-      conversations: {
-        ...state.conversations,
-        [conversationId]: (state.conversations[conversationId] ?? []).map((m) =>
-          m.id === messageId ? { ...m, content } : m
-        ),
-      },
-    })),
+      updateMessage: (conversationId, messageId, content) =>
+        set((state) => ({
+          conversations: {
+            ...state.conversations,
+            [conversationId]: (state.conversations[conversationId] ?? []).map((m) =>
+              m.id === messageId ? { ...m, content } : m
+            ),
+          },
+        })),
 
-  deleteMessage: (conversationId, messageId) =>
-    set((state) => ({
-      conversations: {
-        ...state.conversations,
-        [conversationId]: (state.conversations[conversationId] ?? []).filter(
-          (m) => m.id !== messageId
-        ),
-      },
-    })),
+      deleteMessage: (conversationId, messageId) =>
+        set((state) => ({
+          conversations: {
+            ...state.conversations,
+            [conversationId]: (state.conversations[conversationId] ?? []).filter(
+              (m) => m.id !== messageId
+            ),
+          },
+        })),
 
-  initConversation: (conversationId, initialMessages) =>
-    set((state) => {
-      if (state.conversations[conversationId]) return state;
-      return {
-        conversations: { ...state.conversations, [conversationId]: initialMessages },
-      };
+      initConversation: (conversationId, initialMessages) =>
+        set((state) => {
+          if (state.conversations[conversationId]) return state;
+          return {
+            conversations: { ...state.conversations, [conversationId]: initialMessages },
+          };
+        }),
+
+      clearConversation: (conversationId) =>
+        set((state) => {
+          const { [conversationId]: _, ...rest } = state.conversations;
+          return { conversations: rest };
+        }),
     }),
-
-  clearConversation: (conversationId) =>
-    set((state) => {
-      const { [conversationId]: _, ...rest } = state.conversations;
-      return { conversations: rest };
-    }),
-}));
+    {
+      name: 'chat-store',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({ conversations: state.conversations }),
+    }
+  )
+);

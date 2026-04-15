@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Agent, AgentStatus } from '../types';
 import { electronStorage } from './electronStorage';
+import { useTeamStore } from './teamStore';
+import { useFreeConnectionStore } from './freeConnectionStore';
 
 interface AgentStore {
   agents: Record<string, Agent>;
@@ -50,6 +52,20 @@ export const useAgentStore = create<AgentStore>()(
       },
 
       deleteAgent: (id) => {
+        // Bug 1 + Bug 2: clean team references and team/free connections before removing the agent
+        const teams = useTeamStore.getState().teams;
+        for (const team of Object.values(teams)) {
+          if (team.agents.includes(id)) {
+            useTeamStore.getState().removeAgentFromTeam(id, team.id);
+          }
+        }
+        const freeConnections = useFreeConnectionStore.getState().connections;
+        for (const conn of freeConnections) {
+          if (conn.fromAgentId === id || conn.toAgentId === id) {
+            useFreeConnectionStore.getState().removeConnection(conn.id);
+          }
+        }
+
         set((state) => {
           const { [id]: _, ...rest } = state.agents;
           return {

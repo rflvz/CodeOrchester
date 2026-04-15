@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Team, AgentConnection } from '../types';
 import { createElectronStorage } from './electronStorage';
+import { useAgentStore } from './agentStore';
 
 interface TeamStore {
   teams: Record<string, Team>;
@@ -66,13 +67,35 @@ export const useTeamStore = create<TeamStore>()(
         set((state) => {
           const team = state.teams[teamId];
           if (!team || team.agents.includes(agentId)) return state;
+
+          // Bug 6: if agent already belongs to another team, remove them from it first
+          const currentTeamId = useAgentStore.getState().agents[agentId]?.teamId;
+          let newTeams = state.teams;
+          if (currentTeamId && currentTeamId !== teamId) {
+            const oldTeam = newTeams[currentTeamId];
+            if (oldTeam) {
+              newTeams = {
+                ...newTeams,
+                [currentTeamId]: {
+                  ...oldTeam,
+                  agents: oldTeam.agents.filter((id) => id !== agentId),
+                  connections: oldTeam.connections.filter(
+                    (c) => c.fromAgentId !== agentId && c.toAgentId !== agentId
+                  ),
+                },
+              };
+            }
+          }
+
           return {
             teams: {
-              ...state.teams,
+              ...newTeams,
               [teamId]: { ...team, agents: [...team.agents, agentId] },
             },
           };
         });
+        // Bug 1: sync agent.teamId
+        useAgentStore.getState().updateAgent(agentId, { teamId });
       },
 
       removeAgentFromTeam: (agentId, teamId) => {
@@ -82,10 +105,19 @@ export const useTeamStore = create<TeamStore>()(
           return {
             teams: {
               ...state.teams,
-              [teamId]: { ...team, agents: team.agents.filter((id) => id !== agentId) },
+              [teamId]: {
+                ...team,
+                agents: team.agents.filter((id) => id !== agentId),
+                // Bug 2: clean orphan connections within the team
+                connections: team.connections.filter(
+                  (c) => c.fromAgentId !== agentId && c.toAgentId !== agentId
+                ),
+              },
             },
           };
         });
+        // Bug 1: sync agent.teamId
+        useAgentStore.getState().updateAgent(agentId, { teamId: null });
       },
 
       addConnection: (teamId, connection) => {

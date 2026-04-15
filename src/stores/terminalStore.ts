@@ -8,7 +8,7 @@ export interface PtyLogEntry {
   isError?: boolean;
 }
 
-const MAX_RECENT_LOGS = 100;
+const MAX_RECENT_LOGS = 500;
 
 // agentSessionMap: agentId → sessionId. Used by App.tsx (TODO #4) and AgentChat (TODO #5)
 // to resolve which PTY session belongs to which agent.

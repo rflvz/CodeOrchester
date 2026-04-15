@@ -32,7 +32,7 @@ export function Dashboard() {
   // Poll system metrics every 5s
   useEffect(() => {
     const fetchMetrics = async () => {
-      if (!window.electron) return;
+      if (!window.electron?.getSystemMetrics) return;
       const m = await window.electron.getSystemMetrics();
       setMetrics(m);
     };
